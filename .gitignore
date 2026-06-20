@@ -1,0 +1,18 @@
+# segredos
+.env
+
+# dado pessoal/financeiro real (extratos de negociacao e relatorios gerados)
+scrape/importados/
+relatorio_*.pdf
+relatorio_*.xlsx
+
+# cache de raspagem (regeneravel, pesado -- nao faz sentido versionar)
+scrape/cvm_cache/
+
+# python
+__pycache__/
+*.pyc
+
+# ferramentas locais
+.claude/
+.playwright-mcp/

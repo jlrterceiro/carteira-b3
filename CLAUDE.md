@@ -1,0 +1,321 @@
+# Scraper — rastreador de carteira de investimentos
+
+Projeto pessoal multi-usuário: cada usuário tem sua carteira de investimentos B3, importada
+via extrato de negociação. Hoje tem 3 usuários (`jlrterceiro`, `mario.eulalio`, `ediesley`),
+cada um com uma carteira chamada `Carteira Aposentadoria` (nomes podem repetir entre usuários
+— a unicidade é por `id_usuario`). Corretoras cadastradas: NU INVESTIMENTOS S.A. - CTVM e
+XP INVESTIMENTOS CCTVM S/A.
+
+Banco Postgres local `investimentos`, usuário `terceiro`, host `localhost`, porta `5432`.
+Credenciais ficam em `.env` na raiz do projeto (não commitado em lugar nenhum, é só local) —
+`db_lib.py` carrega esse arquivo automaticamente antes de conectar. Pra rodar SQL direto:
+`PGPASSWORD=<senha> psql -h localhost -U terceiro -d investimentos -f arquivo.sql` (senha
+está no `.env`).
+
+## Estrutura de pastas
+
+Projeto pensado pra eventualmente virar multi-usuário "de verdade" (API + frontend, talvez
+profissional) — por isso a separação:
+
+- `db_lib.py` (raiz) — `get_conn()` + carregamento do `.env`. Compartilhado por `scrape/` e
+  `backend/`; cada script faz `sys.path.insert(0, ...)` pra subir até a raiz e importar.
+- `scrape/` — tudo que busca dado de fonte externa (yfinance, dadosdemercado.com.br) ou de
+  arquivo (planilha de negociação) e grava no banco. `scrape/scraper_lib.py` tem só os
+  helpers de scraping HTML (`get_html`, `parse_tickers`, `normalize_ticker`, `BASE`) — não
+  tem `get_conn` mais, isso é responsabilidade do `db_lib.py`. `scrape/importados/` guarda as
+  planilhas já importadas.
+- `backend/` — schema (`backend/schema/*.sql`), funções de cálculo (`backend/functions/*.sql`),
+  testes de regressão (`backend/tests/test_validacoes.sql`), geradores de relatório PDF/Excel
+  (`backend/relatorios/*.py`) e a API (`backend/api/`, ver seção própria abaixo).
+- `frontend/` — `app.py`, dashboard Streamlit (ver seção própria abaixo).
+
+Se trocar a fonte de dados de cotação/balanço/etc no futuro, só precisa trocar o scraper
+correspondente em `scrape/` — nada em `backend/` referencia yfinance ou dadosdemercado.com.br
+diretamente, só lê das tabelas.
+
+## Schema (public, 23 tabelas)
+
+- `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
+- `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao` (histórico de preços diário)
+- `tb_evento_corporativo` (SPLIT/GRUP, com `vl_fator`) por `id_ativo`
+- `tb_provento` (valor bruto por ação por `id_ativo`+`dt_ex`, raw do yfinance) +
+  `vl_unitario_ajustado` (corrigido por `fn_popula_provento_ajustado`, ver seção de splits abaixo)
+- `tb_posicao_diaria` — snapshot diário (carteira, corretora, ativo), recalculado do zero por `fn_popula_posicao_diaria`
+- `tb_provento_recebido` — proventos cruzados com a posição na data-com, uma linha só por evento real (não preenche dia a dia)
+- `tb_rentabilidade_ativo_diaria` — ganho/base em R$ por (carteira, corretora, ativo, dia de pregão)
+- `tb_rentabilidade_diaria` — rollup de `tb_rentabilidade_ativo_diaria` via `GROUPING SETS` sobre usuário/carteira/corretora (8 combinações por dia, `NULL` = "todos" naquela dimensão)
+- `tb_balanco_patrimonial` — balanço (só ações), ~12 métricas curadas, ANUAL+TRIMESTRAL via yfinance, sem `fn_popula_*` (dado raspado direto, não depende de outra tabela)
+- `tb_dre` — DRE (só ações), 15 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
+- `tb_dre_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM, sem curadoria, usada por `popula_dre.py` pra montar `tb_dre` (ver seção própria abaixo)
+- `tb_dre_old_yfinance` — histórica/descontinuada, DRE via yfinance, não recebe mais atualização (ver seção própria abaixo)
+- `tb_valor_mercado` — snapshot de valor de mercado por dia de raspagem (`fast_info.marketCap` do yfinance), histórico se constrói rodando o scraper periodicamente
+- `tb_ticker_historico` / `tb_corretora_historico` — mapeiam nomes antigos pra ids atuais (tickers trocados, corretoras renomeadas/fundidas)
+
+Volume em 2026-06-20: ~400 ativos, ~1100 operações, ~750 eventos corporativos, ~1,70M
+cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~3.460 linhas de balanço,
+~15k linhas de DRE (CVM, TRIMESTRAL).
+
+## Scripts Python (`scrape/`)
+
+- `scraper_lib.py` — helpers de scraping HTML (`get_html`, `parse_tickers`, `normalize_ticker`, `BASE`)
+- `scraper_emissores.py`, `scraper_ativos.py` — raspam dadosdemercado.com.br (`/acoes`) via regex em HTML
+- `scraper_cotacoes.py <TICKER opcional>` — histórico completo de preços via yfinance (`TICKER.SA`), substitui tudo (`DELETE` + reinsere)
+- `scraper_eventos_corporativos.py <TICKER opcional>` — splits/grupamentos via `yfinance` (`t.splits`)
+- `scraper_proventos.py <TICKER opcional>` — dividendos/JCP/rendimento via `yfinance` (`t.dividends`), valor bruto raw (sem distinguir tipo)
+- `scraper_balanco_patrimonial.py <TICKER opcional>` — balanço patrimonial via yfinance (`balance_sheet`/`quarterly_balance_sheet`), só ações. `vl_caixa` usa caixa+aplicações financeiras quando disponível; `vl_divida_liquida` é SEMPRE calculada como `vl_divida_total - vl_caixa` (o "Net Debt" pronto do yfinance não é confiável, testado contra StatusInvest e Investidor10 — pra bancos/corretoras como BRBI11 fica especialmente errado, "Total Debt" inclui funding de cliente; usuário optou por deixar como está em vez de nulificar pra esse setor).
+- `scraper_dre.py <TICKER opcional>` — raspagem crua da DRE via dados abertos da CVM, só ações, popula só `tb_dre_conta` (ver seção própria abaixo). `popula_dre.py <TICKER opcional>` — curadoria local (lê `tb_dre_conta`, sem rede) que popula `tb_dre`; separado do scraper de propósito, pra corrigir bug de casamento sem precisar rebaixar nada da CVM. `scraper_dre_old_yfinance.py` — histórico/descontinuado, não roda mais (ver seção própria abaixo).
+- `scraper_valor_mercado.py <TICKER opcional>` — valor de mercado via yfinance (`fast_info.marketCap`), só ações, um snapshot por dia de execução.
+- `import_operacoes.py <arquivo.xlsx> <sg_usuario>` — importa export de negociação da B3 pra carteira `Carteira Aposentadoria` do usuário informado, dedup por (ativo, tipo, data, qtd, preço) contando ocorrências já existentes. Planilhas já importadas ficam em `scrape/importados/`.
+
+## Geradores de relatório (`backend/relatorios/`)
+
+- `gerar_relatorio_pdf.py <sg_usuario> <nome> <caminho.pdf>` — relatório de ganhos completo (igual `fn_ganho_total`) em PDF.
+- `gerar_relatorio_ncav.py` — top 20 ações por desconto de NCAV (ver seção própria abaixo), em PDF e Excel.
+
+## API (`backend/api/`)
+
+FastAPI fininho sobre as funções SQL existentes — autenticação por JWT em cookie `httpOnly`
+(`JWT_SECRET` no `.env`, validade 7 dias, sem refresh token ainda). Subir com
+`uvicorn backend.api.main:app --reload` a partir da raiz do projeto; `/docs` tem o Swagger.
+
+- `security.py` — hash/verificação de senha (`bcrypt`), cria/decodifica token (`pyjwt`).
+- `deps.py` — `get_current_user` (lê o cookie, decodifica o JWT, busca o usuário em
+  `tb_usuario` por `id_usuario` do token) e `get_db`. **Todo endpoint protegido usa o
+  `sg_usuario` do usuário autenticado pra filtrar as funções SQL — nunca um parâmetro vindo
+  do cliente.**
+- `auth.py` — `POST /auth/cadastro` (cria usuário + carteira default "Carteira Principal";
+  se o e-mail já existir em `tb_usuario` sem `ds_senha_hash`, "reivindica" a conta em vez de
+  criar outra — é assim que os 3 usuários que já existiam sem senha entram no sistema),
+  `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+- `carteira.py` — `GET /carteira/posicao` (`fn_posicao_atual`), `GET /carteira/ganhos`
+  (`fn_ganho_total`), ambos protegidos.
+
+`tb_usuario.ds_senha_hash` é nullable de propósito — usuário cadastrado antes da API (direto
+no banco) não tem senha até passar pelo fluxo de reivindicação em `/auth/cadastro`.
+
+Sem recuperação de senha, verificação de e-mail ou revogação de token ainda — endpoints de
+escrita (importar operação, rodar scraper) também não estão expostos, só leitura por agora.
+
+## Frontend (`frontend/app.py`)
+
+Dashboard Streamlit, consome só a API (`backend/api/`) via HTTP — nunca acessa o banco
+direto. Roda com `streamlit run frontend/app.py` (precisa da API rodando em paralelo,
+`http://localhost:8000` por padrão — ver `API_BASE_URL` no topo do arquivo). Guarda a sessão
+HTTP (com o cookie do JWT) em `st.session_state`, que persiste entre os reruns do Streamlit
+pra a mesma sessão de navegador — login fica "lembrado" enquanto a aba estiver aberta.
+
+Telas: login/cadastro (cadastro reaproveita o fluxo de "reivindicar" conta do `/auth/cadastro`
+— tem um aviso na tela sobre isso pra quem já tem conta criada direto no banco) e, depois de
+logado, abas de Posição atual, Ganhos e Rentabilidade.
+
+A aba Rentabilidade usa `GET /carteira/rentabilidade?inicio=&fim=` (ambos opcionais — sem
+`inicio` é "desde o início"), que devolve a série diária do `tb_rentabilidade_diaria` do
+usuário (rollup `id_carteira IS NULL AND id_corretora IS NULL`) mais o agregado por mês/ano/
+total já calculado em SQL via juros compostos (`EXP(SUM(LN(1+pct/100)))-1`, igual o resto do
+projeto — NUNCA somar percentual direto). O frontend recalcula a curva acumulada localmente
+em cima da série diária pra plotar o gráfico (mesma fórmula, só que ponto a ponto); o valor
+final dessa curva sempre bate com `total_pct` vindo da API.
+
+## Pipeline de recálculo
+
+Depois de importar operação nova ou rodar qualquer scraper, rodar:
+
+```sql
+SELECT fn_rebuild_tudo();
+```
+
+Isso chama, na ordem certa: `fn_popula_provento_ajustado` → `fn_popula_posicao_diaria` →
+`fn_popula_provento_recebido` → `fn_popula_rentabilidade_ativo_diaria` →
+`fn_popula_rentabilidade_diaria`. A ordem importa (cada uma depende da anterior) — usar essa
+função em vez de rodar as 5 manualmente. `tb_balanco_patrimonial`/`tb_valor_mercado` não
+entram nesse pipeline (não dependem de nada, são só raspagem direta).
+
+`backend/tests/test_validacoes.sql` tem alguns testes de regressão (conferidos contra fontes
+oficiais) — rodar depois de qualquer mudança nas funções de cálculo.
+
+## Splits/grupamentos retroativos (cuidado nisso)
+
+yfinance reescreve o histórico de **preço de cotação** e de **valor de provento por ação**
+retroativamente pra refletir splits/grupamentos que aconteceram DEPOIS daquela data (assim o
+gráfico/histórico fica contínuo). Isso quebra qualquer comparação direta entre um preço
+nominal histórico (`tb_operacao.vl_preco_unitario`, `tb_provento.vl_unitario`, ambos raw) e
+uma cotação/provento do yfinance pra mesma data, se houve split depois.
+
+`fn_fator_acumulado(id_ativo, dt_referencia)` calcula o produto dos fatores de
+`tb_evento_corporativo` ocorridos DEPOIS da data — usado em dois lugares, em direções opostas:
+- **Rentabilidade diária**: preço de compra/venda (raw) é DIVIDIDO pelo fator antes de comparar com `tb_cotacao` (já ajustada).
+- **Provento**: valor por ação do yfinance (já ajustado pra baixo) é MULTIPLICADO pelo fator pra recuperar o valor real pago na época, gravado em `tb_provento.vl_unitario_ajustado`.
+
+yfinance também tem **eventos de split duplicados** às vezes (mesmo fator, poucos dias de
+diferença — bug deles, confirmado contra fontes oficiais várias vezes, e que volta toda vez
+que o scraper roda de novo porque a fonte continua reportando os dois). Por isso
+`scraper_eventos_corporativos.py` chama `remove_duplicados()` no final de toda execução,
+removendo automaticamente a data mais recente de cada par (mesmo `id_ativo`+`vl_fator`, até 14
+dias de diferença). `test_validacoes.sql` confere que não sobra nenhum par desses.
+
+yfinance também rate-limita/bloqueia depois de raspagens pesadas (centenas de tickers) — se
+um scraper começar a retornar tudo vazio/"possibly delisted" pra tickers que sabidamente
+existem, é isso, não bug: esperar alguns minutos e tentar de novo.
+
+## Same-day COMPRA/VENDA: tie-break
+
+Quando uma planilha de negociação lista VENDA antes de COMPRA no mesmo dia/ativo/carteira/
+corretora, isso pode gerar quantidade negativa transitória e inflar o ganho calculado (venda
+contra custo médio zero). Conta de pessoa física no fracionário não vende a descoberto, então
+a compra teve que ter vindo primeiro na vida real — `fn_extrato_ativo`, `fn_ganho_realizado_venda`
+e `fn_popula_posicao_diaria` desempatam por isso: evento corporativo antes de operação, e
+dentro de operação, COMPRA antes de VENDA no mesmo dia (`ORDER BY dt, (fator IS NULL), (tipo = 'VENDA'), seq`).
+
+## Funções/queries SQL (`backend/functions/`)
+
+Todas as funções de cálculo (`fn_extrato_ativo`, `fn_ganho_realizado_venda`,
+`fn_popula_posicao_diaria`) seguem o mesmo padrão: para cada grupo
+(carteira, corretora, ativo), percorrem COMPRA/VENDA + eventos corporativos em ordem
+cronológica (ver tie-break acima), mantendo:
+- quantidade corrente
+- preço médio ponderado (recalculado em COMPRA, dividido por `vl_fator` em SPLIT/GRUP, inalterado em VENDA)
+
+Ao criar uma nova função de extrato/ganho, replicar esse mesmo loop para manter os números
+consistentes entre as funções.
+
+- `fn_extrato_ativo(ticker, usuario?)` — extrato evento a evento de um ativo, em ordem
+  cronológica única (todas as corretoras misturadas), com ganho realizado por venda e total no fim.
+- `fn_ganho_realizado_venda(dt_inicio?, dt_fim?, carteira?, corretora?, usuario?)` — ganho de
+  capital realizado agregado por ativo, com filtro de período opcional.
+- `fn_extrato_provento(dt_inicio?, dt_fim?, carteira?, corretora?, usuario?)` — extrato de
+  proventos linha a linha (uma por ativo+data ex), lendo de `tb_provento_recebido`.
+- `fn_provento_recebido(dt_inicio?, dt_fim?, carteira?, corretora?, usuario?)` — proventos
+  totais por ativo, mesmos filtros.
+- `fn_ganho_total(dt_inicio?, dt_fim?, carteira?, corretora?, usuario?)` — por ativo:
+  `ganho_realizado_vendas`, `proventos`, `ganho_nao_realizado`, `ganho_total`,
+  `valor_investido` (total histórico comprado, não filtra por período) e `ganho_pct_total`.
+  Combina as três funções acima + posição atual x cotação mais recente.
+- `fn_posicao_atual(usuario?)` / `fn_posicao_acoes(usuario?)` — posição atual usando
+  `tb_posicao_diaria` (já considera eventos corporativos). Praticamente equivalentes hoje;
+  existem dois nomes por causa de uma versão antiga de `fn_posicao_acoes` que calculava
+  direto de `tb_operacao` sem ajuste de split (estava errada, foi corrigida).
+- `fn_popula_posicao_diaria()` / `fn_popula_provento_ajustado()` / `fn_popula_provento_recebido()` /
+  `fn_popula_rentabilidade_ativo_diaria()` / `fn_popula_rentabilidade_diaria()` — populam as
+  tabelas derivadas, chamadas em ordem por `fn_rebuild_tudo()`.
+
+## Rentabilidade diária (TWR)
+
+`tb_rentabilidade_ativo_diaria` guarda, por (carteira, corretora, ativo, dia de pregão),
+`vl_base` (capital exposto no dia) e `vl_ganho` (ganho em R$, incluindo provento do dia). A
+fórmula usa o fechamento de ontem como referência (não a abertura de hoje) pra capturar
+também o retorno overnight — isso é necessário pra capturar o efeito de ex-dividendo
+corretamente (o preço cai no ex, o provento compensa, ambos no mesmo dia).
+
+Pra rentabilidade composta de um período: `EXP(SUM(LN(1 + rentabilidade_pct/100))) - 1`
+sobre as linhas de `tb_rentabilidade_diaria` filtradas (NÃO somar os percentuais — isso dá
+resultado errado).
+
+**Não trata `TRANSF`** (transferência entre carteira/corretora) — só `fn_popula_posicao_diaria`
+trata isso hoje. Se uma transferência acontecer, o dia da transferência vai calcular
+base/ganho errado nessa tabela. Pendente.
+
+CDI, SELIC, Ibovespa e S&P 500 não fazem parte do banco — quando pedido, busco sob demanda
+(BCB SGS API pra CDI/SELIC, yfinance `^BVSP`/`^GSPC` pros índices).
+
+## Análise fundamentalista (NCAV / net-net)
+
+`backend/relatorios/gerar_relatorio_ncav.py` calcula, por ação, NCAV = Ativo Circulante −
+Passivo Total (só pra quem tem Patrimônio Líquido > 0 e Ativo Circulante > Passivo Total) e
+ordena por Valor de Mercado / NCAV ascendente — valores menores indicam desconto tipo Graham
+"net-net" (mercado paga menos que o ativo circulante líquido da empresa). Não confundir com
+ordenar pelo inverso (NCAV/VM maior) achando que é o mesmo: dá o mesmo ranking, só muda a
+direção de leitura do número.
+
+## Demonstração de resultado (DRE)
+
+Fonte trocada de yfinance pra dados abertos da CVM (`dados.cvm.gov.br`) depois de achar que
+`vl_resultado_financeiro` vindo do `Net Interest Income` do yfinance estava sistematicamente
+errado (sinal E magnitude, confirmado contra o ITR oficial da Even em 3 trimestres
+diferentes). `tb_dre_old_yfinance` fica como histórico, não recebe mais atualização;
+`scraper_dre_old_yfinance.py` não roda mais.
+
+Pipeline em duas etapas, de propósito separadas (raspar a CVM é lento — baixar+parsear ~16
+anos de ITR pra todo o mercado; casar conta-por-texto é rápido — só leitura local; separar
+evita ter que rebaixar tudo de novo só pra corrigir um bug de casamento):
+- `scraper_dre.py <TICKER opcional>` — baixa os ZIPs anuais da CVM
+  (`itr_cia_aberta_<ano>.zip`, `..._DRE_con_<ano>.csv`/`..._DRE_ind_<ano>.csv`, cache em
+  `scrape/cvm_cache/`), filtra `ORDEM_EXERC='ÚLTIMO'` e o intervalo trimestre-isolado (ver
+  abaixo), aplica a escala (`ESCALA_MOEDA` — 'MIL'/'MILHAO'/'UNIDADE', exceto contas de LPA
+  3.99.\* que a CVM sempre reporta em reais absolutos) e grava **todas** as contas em
+  `tb_dre_conta`, sem curadoria nenhuma. É por CNPJ/emissor (não por ticker) — o resultado é
+  replicado pra todos os `id_ativo` daquele emissor (ON/PN/etc compartilham a mesma DRE).
+- `popula_dre.py <TICKER opcional>` — lê `tb_dre_conta` (sem rede), detecta o perfil contábil
+  e casa cada coluna de `tb_dre` por texto de `ds_conta` (normalizado: minúsculo + sem
+  acento), grava em `tb_dre`. Roda de novo é rápido — é só essa etapa que precisa mudar pra
+  corrigir um bug de casamento.
+
+Cobertura: 378 de 384 ações. Os 6 que faltam não são bug — 5 são tickers antigos sem
+`id_emissor` vinculado (BIDI3/BIDI11, CIEL3, ENBR3, CEPE6 — tickers trocados/descontinuados,
+ver `tb_ticker_historico`) e PPLA11 não tem CNPJ em `tb_emissor`.
+
+**Formato CVM é long/EAV, não wide**: uma linha por (empresa, período, conta do plano de
+contas) — `CNPJ_CIA;DT_REFER;VERSAO;...;CD_CONTA;DS_CONTA;VL_CONTA;ST_CONTA_FIXA`. Duas
+armadilhas no filtro:
+- `ORDEM_EXERC` repete cada conta pro período comparativo do ano anterior
+  (`'PENÚLTIMO'`) — só usar `'ÚLTIMO'`.
+- A partir do 2º trimestre, a CVM reporta TANTO o trimestre isolado (`DT_INI_EXERC` = início
+  daquele trimestre) QUANTO o acumulado desde janeiro (`DT_INI_EXERC` = 1º de janeiro) pro
+  mesmo `DT_REFER` — sem filtrar por isso, pegaria o acumulado por engano (confirmado errado
+  em EVEN3 3T25: peguei R$1.435.896 quando o trimestre isolado real era R$528.822).
+  `scraper_dre.py` mantém só o intervalo ≤ ~95 dias (trimestre isolado); no 1º trimestre os
+  dois coincidem, não tem ambiguidade.
+
+**Consolidado (`_con`) é a fonte preferida** (mesma escolha do resto do projeto — lucro
+atribuível aos controladores etc.), com fallback pra individual (`_ind`) nos períodos que
+faltarem no consolidado: empresa sem subsidiária pra consolidar (Sanepar, Comgás, bancos
+estaduais pequenos como Banese/BNB/Banco da Amazônia) simplesmente não publica `_con`. Nesse
+caso não existe a linha "Atribuído a Sócios da Empresa Controladora" — `vl_lucro_liquido`
+cai pra `vl_lucro_liquido_total` (sem split de minoritários, porque não tem).
+
+**Casamento por texto, não por `cd_conta` fixo**: o plano de contas da CVM é padronizado
+(CPC 26) pra maioria das empresas — `cd_conta` 3.01 a 3.11 com texto idêntico letra por
+letra — MAS bancos "de depósito" de verdade (BBAS3, BPAC3; não BRBI11, que é banco de
+investimento e segue o plano padrão) usam um plano de "Intermediação Financeira" diferente,
+e a posição numérica do resultado final varia até entre bancos (3.11 no BBAS3, 3.09 no
+BPAC3) — mapear por posição fixa não generaliza nem dentro do "perfil banco". Por isso
+`popula_dre.py` casa por frase-âncora no texto de `ds_conta` normalizado pra tudo a partir de
+3.05 (`acha()`); só as posições 3.01-3.04 (receita/custo/lucro bruto/despesas operacionais)
+são estruturalmente estáveis nos dois perfis e usadas por `cd_conta` direto.
+
+Duas decisões de modelagem:
+- `vl_receitas_financeiras`/`vl_despesas_financeiras` são confiáveis (reconciliam exatamente
+  com `vl_resultado_financeiro`, testado em EVEN3: 35.160 − 11.036 = 24.124) — diferente do
+  yfinance, onde `Interest Income`/`Interest Expense` não reconstruíam o `Net Interest
+  Income`. Ficam `NULL` pro perfil banco — esse desmembramento não existe lá, já vem embutido
+  dentro de "Intermediação Financeira" sem separação explícita; `vl_resultado_financeiro`
+  recebe o mesmo valor de `vl_lucro_bruto` nesse perfil (pra um banco, resultado da
+  intermediação financeira *é* o resultado financeiro).
+- `vl_ebitda`/`vl_ebit` saíram da curadoria (existiam na versão yfinance) — não existem como
+  conta na CVM, são métrica voluntária. `vl_lucro_liquido_total` ("Lucro/Prejuízo Consolidado
+  do Período") e `vl_lucro_liquido` ("Atribuído aos Sócios da Empresa Controladora") seguem
+  distintos quando há subsidiária não 100%-controlada; `vl_participacao_nao_controladores`
+  reconcilia os dois, fica `NULL` quando não aplicável.
+
+Bancos não têm o bloco de resultado financeiro separado entre despesas operacionais e
+tributos — `vl_resultado_operacional` e `vl_lucro_antes_impostos` saem iguais pra esse
+perfil, esperado, não é bug.
+
+`vl_lpa_basico`/`vl_lpa_diluido`: empresas têm 1 a 3 classes de ação (ON / ON+PN /
+ON+PNA+PNB) — a posição das contas-filhas de LPA básico/diluído (3.99.01.\*/3.99.02.\*) NÃO é
+estável entre empresas (SHUL4 lista PN antes de ON) — `popula_dre.py` casa pelo texto da
+classe (`tb_ativo.sg_classe`) contra `ds_conta`, nunca por posição. Descarta (vira `NULL`)
+qualquer valor com módulo ≥ 10.000 — a CVM ocasionalmente reporta LPA com erro grosseiro de
+carga (confirmado em MRVE3 2017-06-30: R$614 milhões/ação), mesmo limiar usado pelo scraper
+antigo pro mesmo tipo de problema.
+
+`tb_dre_conta` é a tabela auxiliar/raw — guarda TODAS as contas de TODOS os períodos, sem
+curadoria, serve de auditoria e de fonte pra qualquer métrica que a curadoria de `tb_dre` não
+cobrir. `cd_conta` só serve pra navegar a hierarquia (achar contas-filhas), não é chave de
+identificação estável entre empresas.
+
+## Fontes de dados externas
+
+- dadosdemercado.com.br — scraping HTML (sem API), lista de tickers e detalhe de emissor
+- yfinance — cotações, splits/grupamentos, proventos, balanço patrimonial, valor de mercado (DRE saiu de yfinance, ver seção própria)
+- dados.cvm.gov.br — dados abertos da CVM, DRE (ITR trimestral), ver seção própria
+- planilhas `negociacao-*.xlsx` — exportadas manualmente da B3 e importadas via `import_operacoes.py`, arquivadas em `scrape/importados/` depois de importadas
