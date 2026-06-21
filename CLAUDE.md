@@ -493,6 +493,18 @@ inteiro em vez do 4T isolado (confirmado em RECV3 2025: 4T mostrava R$638mi — 
 vez dos R$50,7mi corretos). Balanço não tem essa classe de bug (`vl_patrimonio_liquido`/
 `vl_participacao_nao_controladores`: 0 ocorrências do mesmo padrão).
 
+**Limitação conhecida, aceita de propósito (anomalia pontual na própria fonte CVM)**:
+confirmado em VITT3 2025-06-30, `3.11.01 + 3.11.02` (−23.010.000 + −131.000 = −23.141.000)
+não reconcilia com `3.11` (−21.183.000, diferença de R$1,96mi) — diferente do bug acima (que
+era 0 e 0), aqui as duas sub-contas têm valor real, só não somam o total corretamente; erro
+da própria CVM nesse trimestre específico, não da curadoria. `vl_lucro_liquido` usa o valor
+que a CVM reporta explicitamente em "Atribuído aos Sócios da Empresa Controladora"
+(−23.010.000) — correto por usar o texto literal da fonte primária, mesmo que o yfinance
+mostre um número diferente (ele deriva por subtração, `Total − Não Controladores`, que dá
+outro resultado quando a fonte não reconcilia). Mesma categoria de anomalia pontual já
+documentada pra CMIG4 (DRE)/MRVE3 (LPA)/AXIA3 (DFC, ver seção própria) — não dá pra
+"corrigir" sem arriscar mascarar um erro real em outro lugar.
+
 **Bug encontrado e corrigido (overflow na estimativa de LPA do 4T)**: a estimativa de LPA do
 4T (`lucro_líquido_4T × lpa_3T ÷ lucro_líquido_3T`, ver acima) explode quando
 `lucro_líquido_3T` é próximo de zero — confirmado em SOND5 (2012-09-30: lucro 3T = −R$12 mil,
