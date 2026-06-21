@@ -210,11 +210,19 @@ def deriva_quarto_trimestre(valores_por_periodo):
     # pro DFC (ver popula_dfc.py), so que aqui os trimestres ja vem isolados (nao YTD), entao
     # subtrai os 3 de uma vez em vez de so o trimestre anterior.
     #
-    # vl_lpa_basico/vl_lpa_diluido ficam de fora da subtracao, sempre NULL pro 4T derivado --
-    # LPA e ponderado pela quantidade de acoes em circulacao em cada trimestre, nao um valor
-    # monetario que soma linearmente (se a empresa emitiu/recomprou acoes no meio do ano,
-    # "Anual - 1T - 2T - 3T" da um numero sem sentido matematico, nao so impreciso) -- melhor
-    # NULL do que um numero errado silenciosamente.
+    # vl_lpa_basico/vl_lpa_diluido ficam de fora da subtracao -- LPA e ponderado pela
+    # quantidade de acoes em circulacao em cada trimestre, nao um valor monetario que soma
+    # linearmente ("Anual - 1T - 2T - 3T" daria um numero sem sentido matematico, nao so
+    # impreciso, se a empresa emitiu/recomprou acoes no meio do ano). Em vez disso, estima
+    # pela quantidade de acoes IMPLICITA no 3T (lucro_liquido_3T / lpa_3T) -- assume que essa
+    # quantidade nao muda muito entre 3T e 4T (corporativamente, a maioria das emissoes/
+    # recompras e gradual, nao um salto abrupto so no ultimo trimestre). Testado contra
+    # qt_acoes (yfinance) em ITSA4: a serie de acoes implicitas e suave e plausivel (~10,3B em
+    # 2024, subindo gradualmente pra ~11,2B em 2026 -- bate com o real). Mas em EVEN3 o LPA
+    # trimestral as vezes vem ZERADO na propria fonte CVM (problema da fonte, nao da
+    # curadoria) -- nesse caso a divisao fica indefinida e o resultado e NULL, corretamente
+    # (nao um numero forcado). So usa o 3T como referencia (nao o anual) porque e o periodo
+    # mais proximo no tempo do 4T que estamos estimando.
     por_ano = {}
     for (dt_referencia, tp_periodo), valores in valores_por_periodo.items():
         chave_periodo = 'ANUAL' if tp_periodo == 'ANUAL' else dt_referencia.month
@@ -226,10 +234,17 @@ def deriva_quarto_trimestre(valores_por_periodo):
             continue
         anual = periodos['ANUAL']
         trimestres = [periodos[mes] for mes in (3, 6, 9)]
+        terceiro_trimestre = trimestres[-1]
         derivado = {}
         for coluna in COLUNAS_TB_DRE:
             if coluna in ('vl_lpa_basico', 'vl_lpa_diluido'):
-                derivado[coluna] = None
+                lpa_3t = terceiro_trimestre[coluna]
+                lucro_liquido_3t = terceiro_trimestre['vl_lucro_liquido']
+                lucro_liquido_4t = derivado['vl_lucro_liquido']
+                if lpa_3t and lucro_liquido_3t and lucro_liquido_4t is not None:
+                    derivado[coluna] = lucro_liquido_4t * lpa_3t / lucro_liquido_3t
+                else:
+                    derivado[coluna] = None
                 continue
             valor_anual = anual[coluna]
             valores_trimestrais = [t[coluna] for t in trimestres]

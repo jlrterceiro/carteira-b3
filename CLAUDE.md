@@ -493,13 +493,31 @@ nome de arquivo/CSV do ITR (só troca `itr_cia_aberta_<ano>.zip` por
 existe a ambiguidade trimestre-isolado-vs-acumulado; o DFP é sempre o ano inteiro, sem
 ambiguidade). `popula_dre.py` deriva o 4T isolado por subtração na curadoria
 (`deriva_quarto_trimestre()`): `Anual − 1T − 2T − 3T`, coluna a coluna, só quando os 4
-períodos do mesmo ano civil estão disponíveis. `vl_lpa_basico`/`vl_lpa_diluido` ficam sempre
-`NULL` no 4T derivado — LPA é ponderado pela quantidade de ações em circulação em cada
-trimestre, não soma linearmente entre trimestres como um valor monetário (se a empresa
-emitiu/recomprou ações no meio do ano, a subtração dá um número sem sentido matemático, não
-só impreciso) — melhor `NULL` do que um número errado silenciosamente. O total anual em si
-(`tp_periodo='ANUAL'`) fica gravado também, sem nenhuma subtração — útil por si só (ex: "qual
-foi o lucro líquido do ano inteiro").
+períodos do mesmo ano civil estão disponíveis. O total anual em si (`tp_periodo='ANUAL'`)
+fica gravado também, sem nenhuma subtração — útil por si só (ex: "qual foi o lucro líquido do
+ano inteiro").
+
+`vl_lpa_basico`/`vl_lpa_diluido` NÃO entram na subtração — LPA é ponderado pela quantidade de
+ações em circulação em cada trimestre, não soma linearmente como um valor monetário
+("Anual − 1T − 2T − 3T" daria um número sem sentido matemático, não só impreciso, se a
+empresa emitiu/recomprou ações no meio do ano). Em vez disso, **estima** o LPA do 4T usando a
+quantidade de ações IMPLÍCITA no 3T (`lucro_líquido_3T / lpa_3T`) como proxy pra "ações em
+circulação no 4T" — assume que essa quantidade não muda muito entre 3T e 4T (emissões/
+recompras corporativas costumam ser graduais, não um salto abrupto isolado no último
+trimestre). Validado contra `qt_acoes` (yfinance) em ITSA4: a série de ações implícitas é
+suave e plausível (~10,3 bilhões em 2024, subindo gradualmente pra ~11,2 bilhões em 2026,
+bate com o real) e o LPA derivado do 4T fica exatamente entre o 3T e o 1T seguinte nos dois
+anos testados. Usa o 3T como referência (não o anual) por ser o período mais próximo no
+tempo do 4T que está sendo estimado.
+
+Fica `NULL` quando a divisão não é confiável — `lpa_3T=0` ou `lucro_líquido_3T=0` (a CVM
+reporta LPA trimestral como exatamente `0,0000`, não faltando, em ~38% dos terceiros
+trimestres da base; confirmado em ABCB4 2020-2025, todos os anos: a conta `3.99.01`/`3.99.02`
+em si vem zerada na fonte, sem nenhuma sub-conta de classe — não é bug de extração, é
+ausência de disclosure trimestral de LPA por parte de algumas empresas, mais comum em bancos)
+— cobertura do LPA derivado no 4T fica em ~54% da base por causa disso, bem abaixo do ~95%
+do 1T/2T/3T (que conta um `0,0000` reportado como "presente", mesmo sem ser informação
+realmente útil).
 
 `tb_dre_conta` é a tabela auxiliar/raw — guarda TODAS as contas de TODOS os períodos, sem
 curadoria, serve de auditoria e de fonte pra qualquer métrica que a curadoria de `tb_dre` não
