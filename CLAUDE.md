@@ -33,7 +33,7 @@ Se trocar a fonte de dados de cotação/balanço/etc no futuro, só precisa troc
 correspondente em `scrape/` — nada em `backend/` referencia yfinance ou dadosdemercado.com.br
 diretamente, só lê das tabelas.
 
-## Schema (public, 23 tabelas)
+## Schema (public, 24 tabelas)
 
 - `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
 - `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao` (histórico de preços diário)
@@ -44,7 +44,9 @@ diretamente, só lê das tabelas.
 - `tb_provento_recebido` — proventos cruzados com a posição na data-com, uma linha só por evento real (não preenche dia a dia)
 - `tb_rentabilidade_ativo_diaria` — ganho/base em R$ por (carteira, corretora, ativo, dia de pregão)
 - `tb_rentabilidade_diaria` — rollup de `tb_rentabilidade_ativo_diaria` via `GROUPING SETS` sobre usuário/carteira/corretora (8 combinações por dia, `NULL` = "todos" naquela dimensão)
-- `tb_balanco_patrimonial` — balanço (só ações), ~12 métricas curadas, ANUAL+TRIMESTRAL via yfinance, sem `fn_popula_*` (dado raspado direto, não depende de outra tabela)
+- `tb_balanco_patrimonial` — balanço (só ações), 14 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
+- `tb_balanco_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM pro balanço, sem curadoria, usada por `popula_balanco.py` pra montar `tb_balanco_patrimonial` (ver seção própria abaixo)
+- `tb_balanco_patrimonial_old_yfinance` — histórica/descontinuada, balanço via yfinance, não recebe mais atualização (ver seção própria abaixo)
 - `tb_dre` — DRE (só ações), 15 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
 - `tb_dre_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM, sem curadoria, usada por `popula_dre.py` pra montar `tb_dre` (ver seção própria abaixo)
 - `tb_dre_old_yfinance` — histórica/descontinuada, DRE via yfinance, não recebe mais atualização (ver seção própria abaixo)
@@ -52,8 +54,8 @@ diretamente, só lê das tabelas.
 - `tb_ticker_historico` / `tb_corretora_historico` — mapeiam nomes antigos pra ids atuais (tickers trocados, corretoras renomeadas/fundidas)
 
 Volume em 2026-06-20: ~400 ativos, ~1100 operações, ~750 eventos corporativos, ~1,70M
-cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~3.460 linhas de balanço,
-~15k linhas de DRE (CVM, TRIMESTRAL).
+cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~15k linhas de balanço
+(CVM, TRIMESTRAL), ~15k linhas de DRE (CVM, TRIMESTRAL).
 
 ## Scripts Python (`scrape/`)
 
@@ -62,7 +64,7 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~3.460 l
 - `scraper_cotacoes.py <TICKER opcional>` — histórico completo de preços via yfinance (`TICKER.SA`), substitui tudo (`DELETE` + reinsere)
 - `scraper_eventos_corporativos.py <TICKER opcional>` — splits/grupamentos via `yfinance` (`t.splits`)
 - `scraper_proventos.py <TICKER opcional>` — dividendos/JCP/rendimento via `yfinance` (`t.dividends`), valor bruto raw (sem distinguir tipo)
-- `scraper_balanco_patrimonial.py <TICKER opcional>` — balanço patrimonial via yfinance (`balance_sheet`/`quarterly_balance_sheet`), só ações. `vl_caixa` usa caixa+aplicações financeiras quando disponível; `vl_divida_liquida` é SEMPRE calculada como `vl_divida_total - vl_caixa` (o "Net Debt" pronto do yfinance não é confiável, testado contra StatusInvest e Investidor10 — pra bancos/corretoras como BRBI11 fica especialmente errado, "Total Debt" inclui funding de cliente; usuário optou por deixar como está em vez de nulificar pra esse setor).
+- `scraper_balanco_patrimonial.py <TICKER opcional>` — raspagem crua do balanço via dados abertos da CVM, só ações, popula só `tb_balanco_conta` (ver seção própria abaixo). `popula_balanco.py <TICKER opcional>` — curadoria local (lê `tb_balanco_conta`, sem rede) que popula `tb_balanco_patrimonial`, mesmo padrão de separação do DRE. `scraper_qt_acoes.py <TICKER opcional>` — só atualiza `qt_acoes` em `tb_balanco_patrimonial` via yfinance (`Ordinary Shares Number`), `UPDATE`-only (nunca `INSERT`, a linha já existe via `popula_balanco.py`) — ver seção própria abaixo pro motivo. `scraper_balanco_patrimonial_old_yfinance.py` — histórico/descontinuado, não roda mais.
 - `scraper_dre.py <TICKER opcional>` — raspagem crua da DRE via dados abertos da CVM, só ações, popula só `tb_dre_conta` (ver seção própria abaixo). `popula_dre.py <TICKER opcional>` — curadoria local (lê `tb_dre_conta`, sem rede) que popula `tb_dre`; separado do scraper de propósito, pra corrigir bug de casamento sem precisar rebaixar nada da CVM. `scraper_dre_old_yfinance.py` — histórico/descontinuado, não roda mais (ver seção própria abaixo).
 - `scraper_valor_mercado.py <TICKER opcional>` — valor de mercado via yfinance (`fast_info.marketCap`), só ações, um snapshot por dia de execução.
 - `import_operacoes.py <arquivo.xlsx> <sg_usuario>` — importa export de negociação da B3 pra carteira `Carteira Aposentadoria` do usuário informado, dedup por (ativo, tipo, data, qtd, preço) contando ocorrências já existentes. Planilhas já importadas ficam em `scrape/importados/`.
@@ -225,6 +227,69 @@ ordena por Valor de Mercado / NCAV ascendente — valores menores indicam descon
 "net-net" (mercado paga menos que o ativo circulante líquido da empresa). Não confundir com
 ordenar pelo inverso (NCAV/VM maior) achando que é o mesmo: dá o mesmo ranking, só muda a
 direção de leitura do número.
+
+## Balanço patrimonial
+
+Mesma migração da DRE, mesmo motivo: troca de yfinance pra dados abertos da CVM
+(`dados.cvm.gov.br`), pipeline em duas etapas (`scraper_balanco_patrimonial.py` cru →
+`tb_balanco_conta`, `popula_balanco.py` curadoria local sem rede → `tb_balanco_patrimonial`).
+`tb_balanco_patrimonial_old_yfinance` fica como histórico, não recebe mais atualização.
+
+A CVM publica ativo (`BPA`) e passivo (`BPP`) em arquivos separados (diferente da DRE, que é
+um arquivo só) — `scraper_balanco_patrimonial.py` junta os dois pelo mesmo
+(`dt_referencia`, `tp_periodo`) antes de gravar em `tb_balanco_conta`; `cd_conta` começando
+com `'1'` é do ativo, com `'2'` é do passivo, então cabem na mesma tabela sem coluna extra.
+Balanço é foto (`DT_FIM_EXERC`), não fluxo como a DRE — não tem o problema de
+trimestre-isolado-vs-acumulado, só o filtro padrão `ORDEM_EXERC='ÚLTIMO'` (ignora o
+comparativo do ano anterior). Mesmo fallback consolidado→individual da DRE pras empresas sem
+subsidiária pra consolidar (Sanepar, Comgás, bancos estaduais pequenos).
+
+Mesmo achado de perfil da DRE: bancos "de depósito" (BBAS3, BPAC3 etc. — não BRBI11, banco de
+investimento, que segue o plano padrão) têm plano de contas diferente pro ativo/passivo, sem
+o conceito de circulante/não circulante (`cd_conta='1.01'` é "Ativo Circulante" pro padrão,
+"Caixa e Equivalentes de Caixa" pro banco — mesmo código, conceito totalmente diferente).
+`vl_ativo_total` (`'1'`) e `vl_passivo_total` (`'2'`) são estáveis nos dois perfis; todo o
+resto é casado por texto de `ds_conta` normalizado em `popula_balanco.py`.
+`vl_ativo_circulante`/`vl_passivo_circulante`/`vl_capital_giro` ficam `NULL` pro perfil banco
+— não é dado faltando, o conceito não existe nesse plano de contas. Achado um perfil a mais
+que a DRE não tinha: seguradoras (BBSE3) seguem o plano padrão (têm Ativo/Passivo Circulante
+normal) mas genuinamente não têm linha de "Empréstimos e Financiamentos" — `vl_divida_total`
+fica `NULL` só pra esse caso, também não é bug.
+
+`vl_patrimonio_liquido_total`/`vl_patrimonio_liquido`/`vl_participacao_nao_controladores`
+seguem o mesmo padrão da DRE (`vl_lucro_liquido_total`/`vl_lucro_liquido`) — "Patrimônio
+Líquido Consolidado" inclui participação de não controladores, confirmado em EVEN3 (total
+2.305.504 − participação 377.994 = 1.927.510, bate exato com o "Stockholders Equity" do
+yfinance, que só contava a parte dos controladores sem deixar isso explícito). A frase de
+não-controladores no `ds_conta` varia por empresa ("Participação dos Acionistas Não
+Controladores" como irmã das reservas em algumas, "Patrimônio Líquido Atribuído aos Não
+Controladores" como filho direto em outras) — `popula_balanco.py` casa só por "não
+controlador", que cobre as duas variações.
+
+`vl_caixa`: caixa + aplicações financeiras de curto prazo (`1.01.01` + `1.01.02`) pro perfil
+padrão; só o caixa estreito (`1.01`) pro perfil banco — o "Ativos Financeiros" bancário
+(`1.02`) inclui carteira de crédito/empréstimos a clientes, não é caixa.
+
+`vl_divida_total` pro perfil padrão soma "Empréstimos e Financiamentos" circulante e não
+circulante (`2.01.04` + `2.02.01`, restringindo a busca por prefixo de `cd_conta` — o mesmo
+texto existe nos dois níveis com a mesma profundidade, sem restringir o casamento por texto
+empataria e podia pegar a conta errada). Pro perfil banco usa "Passivos Financeiros ao Custo
+Amortizado" (`2.02`) inteiro — inclui depósito de cliente, mesmo problema já aceito pro "Total
+Debt" do yfinance nesse setor (decisão anterior do usuário foi manter o número "imperfeito"
+em vez de nulificar; mantido aqui pela mesma razão, só que agora com uma base mais completa
+de passivos financeiros da CVM em vez do número opaco do yfinance). `vl_divida_liquida`
+SEMPRE calculada como `vl_divida_total - vl_caixa`.
+
+`vl_valor_patrimonial_tangivel` calculado como `vl_patrimonio_liquido - "Intangível"` (texto)
+— a CVM não tem uma linha pronta de "tangible book value" como o yfinance tinha.
+
+`qt_acoes` CONTINUA vindo do yfinance (`scraper_qt_acoes.py`, só esse campo, `UPDATE`-only) —
+o arquivo `composicao_capital` da CVM (equivalente à contagem de ações) tem erro de escala
+(1000x menor) em pelo menos VALE3 e ITSA4, mas bate certo em PETR4 e EVEN3; sem como validar
+algoritmicamente quais empresas são afetadas sem outra fonte, optou-se por não usar esse
+arquivo. Trade-off aceito: yfinance só cobre os últimos ~4-5 trimestres (ao contrário da CVM,
+que cobre desde 2011), então `qt_acoes` fica `NULL` pra períodos mais antigos — não afeta o
+trimestre mais recente, que é o que importa pra cálculo de valor por ação hoje.
 
 ## Demonstração de resultado (DRE)
 
