@@ -534,6 +534,19 @@ inteiro em vez do 4T isolado (confirmado em RECV3 2025: 4T mostrava R$638mi — 
 vez dos R$50,7mi corretos). Balanço não tem essa classe de bug (`vl_patrimonio_liquido`/
 `vl_participacao_nao_controladores`: 0 ocorrências do mesmo padrão).
 
+**Bug encontrado e corrigido (split controlador/não-controlador invertido, achado validando
+contra o yfinance, 6ª rodada com 20 ações novas)**: variante do bug acima — em vez das duas
+sub-contas zeradas, `3.11.01` ("Atribuído aos Controladores") vem **0** e `3.11.02` ("Não
+Controladores") vem com **praticamente o total inteiro** (tolerância de 1%, por causa de
+arredondamento na própria CVM — ex: EUCA3/EUCA4 1T de todo ano desde 2019: total `95.960.000`
+vs não controladores `95.964.000`). Achado em 55 linhas/~17 ações (EUCA3/EUCA4, VSTE3, AMAR3,
+OPCT3, RNEW3/RNEW4, AGRO3, PATI3/PATI4, LUXM4, VLID3, VIVT3, OSXB3, GGPS3, CMIG3/CMIG4) —
+sinal de que os rótulos das duas sub-contas vieram trocados na própria fonte pra esses
+períodos específicos. Corrigido com o mesmo fallback (usa o total). 4 linhas residuais em
+CMIG3/CMIG4 (2022-06-30, 2022-09-30) não se encaixam no padrão (não controladores não bate
+nem com zero nem com o total) — mesma categoria de anomalia pontual de CMIG4 já documentada,
+deixadas como estão.
+
 **Limitação conhecida, aceita de propósito (anomalia pontual na própria fonte CVM)**:
 confirmado em VITT3 2025-06-30, `3.11.01 + 3.11.02` (−23.010.000 + −131.000 = −23.141.000)
 não reconcilia com `3.11` (−21.183.000, diferença de R$1,96mi) — diferente do bug acima (que

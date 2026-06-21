@@ -236,6 +236,22 @@ def extrai_wide(contas, perfil):
         # preenchido. Mesmo fallback do caso "conta nao existe" acima, so que aqui a conta
         # EXISTE com valor 0 em vez de ausente.
         valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
+    elif (
+        valores['vl_lucro_liquido'] == 0
+        and valores['vl_participacao_nao_controladores'] is not None
+        and valores['vl_lucro_liquido_total']
+        and abs(valores['vl_participacao_nao_controladores'] - valores['vl_lucro_liquido_total'])
+        < 0.01 * abs(valores['vl_lucro_liquido_total'])
+    ):
+        # variante do bug acima, achada validando contra o yfinance: em vez das duas sub-contas
+        # zeradas, "atribuido aos controladores" vem 0 e "nao controladores" vem com
+        # PRATICAMENTE o total inteiro (tolerancia de 1% -- a propria CVM tem arredondamento,
+        # ex: EUCA3/EUCA4 todo 1o trimestre desde 2019, total=95.960.000 vs nao
+        # controladores=95.964.000) -- 55 linhas em ~17 acoes (EUCA3/4, VSTE3, AMAR3, OPCT3,
+        # RNEW3/4, AGRO3, PATI3/4, LUXM4, VLID3, VIVT3, OSXB3, GGPS3, CMIG3/4). Sinal de que os
+        # rotulos das duas sub-contas vieram trocados na propria fonte pra esses periodos
+        # especificos -- usa o total tambem, mesma razao do fallback acima.
+        valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
     if perfil == 'banco':
         # banco nao tem resultado financeiro separado -- a intermediacao financeira (3.01-3.03)
         # JA E o resultado financeiro, nao existe desmembramento em receita/despesa financeira
