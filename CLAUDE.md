@@ -283,6 +283,17 @@ controlador", que cobre as duas variações.
 padrão; só o caixa estreito (`1.01`) pro perfil banco — o "Ativos Financeiros" bancário
 (`1.02`) inclui carteira de crédito/empréstimos a clientes, não é caixa.
 
+**Bug encontrado e corrigido (validando contra o yfinance)**: 25 empresas (confirmado em
+LOGG3) escondem um valor de "Títulos e Valores Mobiliários" dentro de "Outros Ativos
+Circulantes" (`1.01.08`) em vez da linha padrão de Aplicações Financeiras (`1.01.02`) —
+economicamente é a mesma coisa (título/aplicação de curto prazo), mas `vl_caixa` ficava até
+~90% menor que o real pra essas empresas, já que só somava `1.01.01`+`1.01.02`. Corrigido
+somando também o que casar com "títulos e valores mobiliários" dentro de `1.01.08`
+especificamente — restrito a esse ramo de propósito, porque o mesmo texto também aparece
+dentro de `1.01.01`/`1.01.02` (já contado, duplicaria) e de `1.01.03` "Contas a Receber" (não
+é caixa, é recebível). Confirmado em LOGG3 1T26: `7.405 + 43.036 + 339.582 = 390.023` mil,
+bate exato com o yfinance.
+
 `vl_divida_total` pro perfil padrão soma "Empréstimos e Financiamentos" circulante e não
 circulante (`2.01.04` + `2.02.01`, restringindo a busca por prefixo de `cd_conta` — o mesmo
 texto existe nos dois níveis com a mesma profundidade, sem restringir o casamento por texto
