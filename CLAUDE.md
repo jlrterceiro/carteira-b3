@@ -281,6 +281,18 @@ técnicas/provisões de sinistro, não caixa livre. Confirmado em PSSA3 (minha s
 exato, `1.993.244.000`) e HAPV3 (`8.330.387.000`, também exato — plano de saúde usa
 contabilidade de seguro também, mesmo marcador detecta os dois).
 
+Testado também CXSE3, SAUD3 e BBSE3 (outras seguradoras/participações do setor) pra confirmar
+que o marcador não generalizou demais: CXSE3 e SAUD3 já batiam com a fórmula padrão
+(`1.01.01+1.01.02`) antes do fix — pra elas, diferente de PSSA3, o yfinance CONTA as
+aplicações financeiras como caixa (SAUD3: `524.928.000` bate exato; CXSE3: `1,109bi` vs
+`1,076bi` yfinance, só 3% de diferença) — corretamente não caem no perfil `'seguradora'`
+(não têm o marcador "contrato de seguro/resseguro" no texto). BBSE3 diverge muito (minha
+`Caixa e Equivalentes de Caixa`, direto da CVM, é `6.072.474.000`; o yfinance mostra
+`3.603.000`, ~1685x menor) mas não é bug meu — confirmado que não é erro de escala (ativo
+total bate exato nos dois, `19.619.021.000`) e R$6bi de caixa é plausível num ativo total de
+R$19,6bi; R$3,6 milhões não é. Mesma categoria de erro do próprio yfinance já documentada pra
+CMIG4/ITSA4.
+
 **Limitação conhecida, aceita de propósito (perfil seguradora, `vl_divida_total`)**: PSSA3
 continua com gap de ~85% contra o yfinance (R$126,4mi vs R$820,8mi) mesmo depois do fix do
 `vl_caixa` acima — "Empréstimos e Financiamentos" é genuinamente zero na CVM pra esse perfil
