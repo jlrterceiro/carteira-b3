@@ -88,7 +88,10 @@ SELECT
     round(((dv.dividendo_anual_medio / p.vl_fechamento) * 100)::numeric, 2) AS dy_medio_pct,
     round((b.vl_ativo_circulante / b.vl_passivo_circulante)::numeric, 2) AS liquidez_corrente,
     round((b.vl_divida_liquida / b.vl_patrimonio_liquido)::numeric, 2) AS divliq_pl,
+    round(b.vl_ativo_circulante::numeric, 0) AS ativo_circulante,
+    round(b.vl_passivo_total::numeric, 0) AS passivo_total,
     round((b.vl_ativo_circulante - b.vl_passivo_total)::numeric, 0) AS ncav,
+    round((v.vl_valor_mercado / (b.vl_ativo_circulante - b.vl_passivo_total))::numeric, 4) AS vm_sobre_ncav,
     round((v.vl_valor_mercado / b.vl_patrimonio_liquido)::numeric, 2) AS p_vp,
     p.dt_cotacao
 FROM balanco_recente b
@@ -110,7 +113,7 @@ ORDER BY p_vp ASC
 
 COLS = [
     'Ticker', 'ROE medio 5a (%)', 'DY medio 5a (%)', 'Liq. Corrente', 'DivLiq/PL',
-    'NCAV', 'P/VP', 'Cotacao em',
+    'Ativo Circulante', 'Passivo Total', 'NCAV', 'VM/NCAV', 'P/VP', 'Cotacao em',
 ]
 
 
@@ -148,7 +151,7 @@ def gerar_pdf(linhas, caminho):
     pdf.cell(0, 6, f'Gerado em {date.today().strftime("%d/%m/%Y")}', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(3)
 
-    widths = [20, 26, 24, 22, 20, 30, 18, 26]
+    widths = [16, 22, 20, 18, 16, 26, 26, 26, 18, 16, 22]
 
     pdf.set_font('Helvetica', 'B', 8.5)
     pdf.set_fill_color(50, 50, 50)
@@ -159,11 +162,11 @@ def gerar_pdf(linhas, caminho):
     pdf.set_text_color(0, 0, 0)
 
     pdf.set_font('Helvetica', '', 8)
-    for (ticker, roe, dy, liq, divliq_pl, ncav, p_vp, dt_cot) in linhas:
+    for (ticker, roe, dy, liq, divliq_pl, ac, pt, ncav, vm_ncav, p_vp, dt_cot) in linhas:
         valores = [
             ticker,
             fmt_num(roe), fmt_num(dy), fmt_num(liq), fmt_num(divliq_pl),
-            fmt_num(ncav), fmt_num(p_vp),
+            fmt_num(ac), fmt_num(pt), fmt_num(ncav), fmt_num(vm_ncav), fmt_num(p_vp),
             dt_cot.strftime('%d/%m/%Y'),
         ]
         for w, v in zip(widths, valores):
@@ -187,18 +190,19 @@ def gerar_excel(linhas, caminho):
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center')
 
-    for (ticker, roe, dy, liq, divliq_pl, ncav, p_vp, dt_cot) in linhas:
-        ws.append([ticker, roe, dy, liq, divliq_pl, ncav, p_vp, dt_cot])
+    for (ticker, roe, dy, liq, divliq_pl, ac, pt, ncav, vm_ncav, p_vp, dt_cot) in linhas:
+        ws.append([ticker, roe, dy, liq, divliq_pl, ac, pt, ncav, vm_ncav, p_vp, dt_cot])
 
     for row in ws.iter_rows(min_row=2):
         for cell in row[1:5]:
             cell.number_format = '#,##0.00'
-        cell_ncav = row[5]
-        cell_ncav.number_format = '#,##0'
-        row[6].number_format = '0.00'
-        row[7].number_format = 'DD/MM/YYYY'
+        for cell in row[5:8]:
+            cell.number_format = '#,##0'
+        row[8].number_format = '0.0000'
+        row[9].number_format = '0.00'
+        row[10].number_format = 'DD/MM/YYYY'
 
-    larguras = [10, 16, 14, 12, 10, 16, 10, 12]
+    larguras = [10, 16, 14, 12, 10, 18, 18, 18, 12, 10, 12]
     for i, w in enumerate(larguras, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 
