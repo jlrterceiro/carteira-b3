@@ -104,16 +104,22 @@ def fetch_periodos_cvm(cnpj):
     # (dt_referencia, tp_periodo) antes de gravar, pra cada periodo ter ativo+passivo juntos.
     # Consolidado em primeiro lugar, cai pro individual nos periodos que faltarem (empresa
     # sem subsidiaria pra consolidar -- mesmo padrao da DRE).
+    #
+    # ITR (trimestral) so cobre 1T/2T/3T -- nao existe "4o ITR". O DFP (anual) traz o
+    # balanco de 31/12, que serve direto como a "foto" do 4T sem precisar de nenhuma
+    # subtracao (balanco e ponto no tempo, nao acumula como a DRE/DFC) -- grava direto com
+    # tp_periodo='TRIMESTRAL', tanto faz ter vindo do ITR ou do DFP.
     contas_por_chave = {}
-    for demonstrativo in ('BPA', 'BPP'):
-        for grupo in ('con', 'ind'):
-            for ano in range(ANO_INICIAL, ANO_FINAL + 1):
-                df = carrega_ano('itr', ano, demonstrativo, grupo)
-                for tp_periodo, dt_referencia, contas in contas_por_periodo(df, cnpj, 'TRIMESTRAL'):
-                    chave = (dt_referencia, tp_periodo)
-                    fonte = contas_por_chave.setdefault(chave, {})
-                    if grupo == 'con' or demonstrativo not in fonte:
-                        fonte[demonstrativo] = contas
+    for tipo in ('itr', 'dfp'):
+        for demonstrativo in ('BPA', 'BPP'):
+            for grupo in ('con', 'ind'):
+                for ano in range(ANO_INICIAL, ANO_FINAL + 1):
+                    df = carrega_ano(tipo, ano, demonstrativo, grupo)
+                    for tp_periodo, dt_referencia, contas in contas_por_periodo(df, cnpj, 'TRIMESTRAL'):
+                        chave = (dt_referencia, tp_periodo)
+                        fonte = contas_por_chave.setdefault(chave, {})
+                        if grupo == 'con' or demonstrativo not in fonte:
+                            fonte[demonstrativo] = contas
     periodos = []
     for (dt_referencia, tp_periodo), fontes in contas_por_chave.items():
         contas = fontes.get('BPA', []) + fontes.get('BPP', [])

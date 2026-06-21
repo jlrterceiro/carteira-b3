@@ -55,9 +55,11 @@ diretamente, só lê das tabelas.
 - `tb_valor_mercado` — snapshot de valor de mercado por dia de raspagem (`fast_info.marketCap` do yfinance), histórico se constrói rodando o scraper periodicamente
 - `tb_ticker_historico` / `tb_corretora_historico` — mapeiam nomes antigos pra ids atuais (tickers trocados, corretoras renomeadas/fundidas)
 
-Volume em 2026-06-20: ~400 ativos, ~1100 operações, ~750 eventos corporativos, ~1,70M
-cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~15k linhas de balanço
-(CVM, TRIMESTRAL), ~15k linhas de DRE (CVM, TRIMESTRAL), ~15k linhas de DFC (CVM, TRIMESTRAL).
+Volume em 2026-06-21: ~400 ativos, ~1100 operações, ~750 eventos corporativos, ~1,70M
+cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~20k linhas de balanço
+(CVM, TRIMESTRAL — inclui 1T/2T/3T via ITR e 4T via DFP), ~25k linhas de DRE (CVM,
+~20k TRIMESTRAL incluindo 4T derivado por subtração + ~5k ANUAL via DFP), ~25k linhas de DFC
+(mesma mistura TRIMESTRAL/ANUAL da DRE).
 
 ## Scripts Python (`scrape/`)
 
@@ -247,6 +249,14 @@ trimestre-isolado-vs-acumulado, só o filtro padrão `ORDEM_EXERC='ÚLTIMO'` (ig
 comparativo do ano anterior). Mesmo fallback consolidado→individual da DRE pras empresas sem
 subsidiária pra consolidar (Sanepar, Comgás, bancos estaduais pequenos).
 
+**4T via DFP**: não existe "4º ITR" — a CVM só publica o balanço de 31/12 depois do
+encerramento do exercício, via DFP (anual). Diferente da DRE/DFC (fluxo, precisa de
+subtração pra isolar o trimestre), o balanço é foto — o BPA/BPP do DFP em 31/12 JÁ É o "4T",
+sem nenhuma transformação. `scraper_balanco_patrimonial.py` simplesmente busca tanto ITR
+quanto DFP (`for tipo in ('itr', 'dfp')`) e grava tudo com `tp_periodo='TRIMESTRAL'` direto —
+`popula_balanco.py` não precisou de nenhuma mudança, processa o 31/12 vindo do DFP exatamente
+igual a qualquer outro trimestre vindo do ITR.
+
 Mesmo achado de perfil da DRE: bancos "de depósito" (BBAS3, BPAC3 etc. — não BRBI11, banco de
 investimento, que segue o plano padrão) têm plano de contas diferente pro ativo/passivo, sem
 o conceito de circulante/não circulante (`cd_conta='1.01'` é "Ativo Circulante" pro padrão,
@@ -309,8 +319,20 @@ da DRE, que publica os dois). `tb_dfc_conta` guarda o valor exatamente como vem 
 `popula_dfc.py` isola o trimestre por subtração dentro do mesmo ano civil (1T fica como está,
 já que YTD do 1T é o próprio 1T; 2T = YTD 2T − YTD 1T; 3T = YTD 3T − YTD 2T) — assim
 `tp_periodo='TRIMESTRAL'` continua significando "só aquele trimestre" em toda a base, igual
-DRE/balanço. 4T fica de fora por enquanto (precisaria do DFP anual, fora de escopo, mesmo
-ponto pendente da DRE/balanço).
+DRE/balanço.
+
+**4T via DFP**: não existe "4º ITR" — a CVM só publica o ano inteiro depois do encerramento
+do exercício, via DFP (anual), arquivo `dfp_cia_aberta_<ano>.zip` (mesmos nomes de CSV do
+ITR, mesmo parser — só troca o `tipo` do download). `scraper_dfc.py` grava o DFP em
+`tb_dfc_conta` com `tp_periodo='ANUAL'` (sempre o ano inteiro acumulado, igual o YTD do ITR,
+sem filtro de isolamento — `carrega_ano` só pula o filtro de ~95 dias quando `tipo!='itr'`).
+`popula_dfc.py` trata o ANUAL como "mais um período do ano" dentro de `isola_trimestres()`:
+grava o total anual como está (`tp_periodo='ANUAL'`, valor isolado por si só) E, quando o
+período imediatamente anterior é especificamente o 3T (mês 9), deriva o 4T isolado por
+subtração do acumulado de 9 meses (`tp_periodo='TRIMESTRAL'`) — mesma lógica do 2T/3T, só que
+subtraindo do acumulado anual em vez do trimestre anterior. Se faltar o 3T daquele ano (ITR
+não entregue, falha de raspagem), o ANUAL fica como está, sem isolar — subtrair do período
+errado geraria um 4T silenciosamente errado.
 
 **Curadoria mais simples que DRE/balanço**: a posição por `cd_conta` (`6.01` a `6.05`) é
 estável em todos os perfis testados, incluindo banco (BBAS3) e seguradora (BBSE3, só com o
@@ -456,8 +478,28 @@ ON+PNA+PNB) — a posição das contas-filhas de LPA básico/diluído (3.99.01.\
 estável entre empresas (SHUL4 lista PN antes de ON) — `popula_dre.py` casa pelo texto da
 classe (`tb_ativo.sg_classe`) contra `ds_conta`, nunca por posição. Descarta (vira `NULL`)
 qualquer valor com módulo ≥ 10.000 — a CVM ocasionalmente reporta LPA com erro grosseiro de
-carga (confirmado em MRVE3 2017-06-30: R$614 milhões/ação), mesmo limiar usado pelo scraper
-antigo pro mesmo tipo de problema.
+carga (confirmado em MRVE3 2017-06-30: R$614 milhões/ação, e em AMAR3 2021-12-31: R$ −27,44
+QUATRILHÕES/ação — esse último estourava a coluna `NUMERIC(20,4)` na hora do `INSERT`, então
+o limiar (`LIMITE_LPA`) teve que ser replicado em `scraper_dre.py` também, não só em
+`popula_dre.py` — sem isso o scraper quebrava antes da curadoria ter a chance de filtrar),
+mesmo limiar usado pelo scraper antigo pro mesmo tipo de problema.
+
+**4T via DFP**: não existe "4º ITR" — a CVM só publica o trimestral (1T/2T/3T) via ITR; o
+resultado do ano inteiro só sai depois do encerramento do exercício, via DFP (anual), mesmo
+nome de arquivo/CSV do ITR (só troca `itr_cia_aberta_<ano>.zip` por
+`dfp_cia_aberta_<ano>.zip`). `scraper_dre.py` busca os dois (`for tipo, tp_periodo in
+(('itr', 'TRIMESTRAL'), ('dfp', 'ANUAL'))`) e grava o DFP em `tb_dre_conta` com
+`tp_periodo='ANUAL'` — sem o filtro de isolamento de trimestre (só faz sentido pro ITR, onde
+existe a ambiguidade trimestre-isolado-vs-acumulado; o DFP é sempre o ano inteiro, sem
+ambiguidade). `popula_dre.py` deriva o 4T isolado por subtração na curadoria
+(`deriva_quarto_trimestre()`): `Anual − 1T − 2T − 3T`, coluna a coluna, só quando os 4
+períodos do mesmo ano civil estão disponíveis. `vl_lpa_basico`/`vl_lpa_diluido` ficam sempre
+`NULL` no 4T derivado — LPA é ponderado pela quantidade de ações em circulação em cada
+trimestre, não soma linearmente entre trimestres como um valor monetário (se a empresa
+emitiu/recomprou ações no meio do ano, a subtração dá um número sem sentido matemático, não
+só impreciso) — melhor `NULL` do que um número errado silenciosamente. O total anual em si
+(`tp_periodo='ANUAL'`) fica gravado também, sem nenhuma subtração — útil por si só (ex: "qual
+foi o lucro líquido do ano inteiro").
 
 `tb_dre_conta` é a tabela auxiliar/raw — guarda TODAS as contas de TODOS os períodos, sem
 curadoria, serve de auditoria e de fonte pra qualquer métrica que a curadoria de `tb_dre` não

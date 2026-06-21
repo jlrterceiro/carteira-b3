@@ -8,6 +8,7 @@
 import os
 import sys
 import unicodedata
+from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from db_lib import get_conn
@@ -202,6 +203,44 @@ def extrai_wide(contas, perfil):
     return valores
 
 
+def deriva_quarto_trimestre(valores_por_periodo):
+    # ITR (trimestral) so cobre 1T/2T/3T -- nao existe "4o ITR" da CVM, so o anual (DFP),
+    # entregue depois do fim do exercicio. Deriva o 4T isolado por subtracao (Anual - 1T - 2T
+    # - 3T) quando os 4 periodos do mesmo ano civil estao disponiveis -- mesma ideia adotada
+    # pro DFC (ver popula_dfc.py), so que aqui os trimestres ja vem isolados (nao YTD), entao
+    # subtrai os 3 de uma vez em vez de so o trimestre anterior.
+    #
+    # vl_lpa_basico/vl_lpa_diluido ficam de fora da subtracao, sempre NULL pro 4T derivado --
+    # LPA e ponderado pela quantidade de acoes em circulacao em cada trimestre, nao um valor
+    # monetario que soma linearmente (se a empresa emitiu/recomprou acoes no meio do ano,
+    # "Anual - 1T - 2T - 3T" da um numero sem sentido matematico, nao so impreciso) -- melhor
+    # NULL do que um numero errado silenciosamente.
+    por_ano = {}
+    for (dt_referencia, tp_periodo), valores in valores_por_periodo.items():
+        chave_periodo = 'ANUAL' if tp_periodo == 'ANUAL' else dt_referencia.month
+        por_ano.setdefault(dt_referencia.year, {})[chave_periodo] = valores
+
+    derivados = {}
+    for ano, periodos in por_ano.items():
+        if 'ANUAL' not in periodos or not all(mes in periodos for mes in (3, 6, 9)):
+            continue
+        anual = periodos['ANUAL']
+        trimestres = [periodos[mes] for mes in (3, 6, 9)]
+        derivado = {}
+        for coluna in COLUNAS_TB_DRE:
+            if coluna in ('vl_lpa_basico', 'vl_lpa_diluido'):
+                derivado[coluna] = None
+                continue
+            valor_anual = anual[coluna]
+            valores_trimestrais = [t[coluna] for t in trimestres]
+            if valor_anual is None or any(v is None for v in valores_trimestrais):
+                derivado[coluna] = None
+            else:
+                derivado[coluna] = valor_anual - sum(valores_trimestrais)
+        derivados[(date(ano, 12, 31), 'TRIMESTRAL')] = derivado
+    return derivados
+
+
 def upsert_dre(conn, id_ativo, dt_referencia, tp_periodo, valores):
     colunas = list(COLUNAS_TB_DRE)
     placeholders = ', '.join(['%s'] * len(colunas))
@@ -222,10 +261,15 @@ def upsert_dre(conn, id_ativo, dt_referencia, tp_periodo, valores):
 
 def process_ativo(conn, id_ativo, sg_classe):
     periodos = fetch_periodos_locais(conn, id_ativo)
+    valores_por_periodo = {}
     for tp_periodo, dt_referencia, contas in periodos:
         perfil = detecta_perfil(contas)
         valores = extrai_wide(contas, perfil)
         valores.update(extrai_lpa(contas, sg_classe))
+        valores_por_periodo[(dt_referencia, tp_periodo)] = valores
+        upsert_dre(conn, id_ativo, dt_referencia, tp_periodo, valores)
+
+    for (dt_referencia, tp_periodo), valores in deriva_quarto_trimestre(valores_por_periodo).items():
         upsert_dre(conn, id_ativo, dt_referencia, tp_periodo, valores)
 
 

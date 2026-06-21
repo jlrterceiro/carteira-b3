@@ -105,13 +105,23 @@ def fetch_periodos_cvm(cnpj):
     # todas as empresas), Metodo Indireto individual (sem subsidiaria pra consolidar), Metodo
     # Direto consolidado, Metodo Direto individual (poucas empresas, ex: HAGA4 -- mesma
     # estrutura de cd_conta top-level 6.01-6.05, serve de fallback final).
-    fontes = [('DFC_MI', 'con'), ('DFC_MI', 'ind'), ('DFC_MD', 'con'), ('DFC_MD', 'ind')]
+    #
+    # ITR (trimestral) so cobre 1T/2T/3T (sempre acumulado desde janeiro, ver carrega_ano) --
+    # nao existe "4o ITR". O DFP (anual) traz o acumulado do ano inteiro (Jan-Dez), gravado
+    # com tp_periodo='ANUAL' -- popula_dfc.py usa esse valor como "mais um periodo do ano" pra
+    # isolar o 4T por subtracao do acumulado de 9 meses (ver isola_trimestres()), mesma logica
+    # ja usada pra isolar 2T/3T.
+    fontes = [
+        (tipo, demonstrativo, grupo, tp_periodo)
+        for tipo, tp_periodo in (('itr', 'TRIMESTRAL'), ('dfp', 'ANUAL'))
+        for demonstrativo, grupo in (('DFC_MI', 'con'), ('DFC_MI', 'ind'), ('DFC_MD', 'con'), ('DFC_MD', 'ind'))
+    ]
     contas_por_chave = {}
-    for demonstrativo, grupo in fontes:
+    for tipo, demonstrativo, grupo, tp_periodo in fontes:
         for ano in range(ANO_INICIAL, ANO_FINAL + 1):
-            df = carrega_ano('itr', ano, demonstrativo, grupo)
-            for tp_periodo, dt_referencia, contas in contas_por_periodo(df, cnpj, 'TRIMESTRAL'):
-                contas_por_chave.setdefault((dt_referencia, tp_periodo), contas)
+            df = carrega_ano(tipo, ano, demonstrativo, grupo)
+            for tpp, dt_referencia, contas in contas_por_periodo(df, cnpj, tp_periodo):
+                contas_por_chave.setdefault((dt_referencia, tpp), contas)
     return [(tp_periodo, dt_referencia, contas) for (dt_referencia, tp_periodo), contas in contas_por_chave.items()]
 
 

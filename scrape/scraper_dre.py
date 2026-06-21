@@ -16,6 +16,13 @@ ANO_FINAL = date.today().year
 
 FATOR_ESCALA = {'MIL': 1000, 'MILHAO': 1_000_000, 'UNIDADE': 1}
 
+# a CVM ocasionalmente reporta LPA (3.99.*) com erro grosseiro de carga (confirmado em
+# AMAR3 2021-12-31: R$ -27,44 QUATRILHOES/acao, estourando NUMERIC(20,4) na hora do INSERT --
+# mesma categoria de erro pontual ja documentada em popula_dre.py pra MRVE3 2017-06-30, R$614
+# milhoes/acao, so que aquele nao chegava a estourar a coluna). Zera aqui, na raspagem, antes
+# do erro quebrar o INSERT -- mesmo limiar usado em popula_dre.py.
+LIMITE_LPA = 10_000
+
 
 def fetch_emissores(conn, ticker_filter=None):
     query = '''
@@ -80,13 +87,16 @@ def carrega_ano(tipo, ano, grupo):
         return None
     df = pd.read_csv(csv_path, sep=';', encoding='ISO-8859-1', dtype={'CNPJ_CIA': str, 'CD_CONTA': str})
     df = df[df['ORDEM_EXERC'] == 'ÚLTIMO'].copy()
-    # a CVM reporta tanto o trimestre isolado (DT_INI_EXERC = inicio daquele trimestre) quanto
-    # o acumulado desde o inicio do ano (DT_INI_EXERC = 1o de janeiro) pro mesmo DT_REFER, a
-    # partir do 2o trimestre -- sem filtrar, pegariamos o acumulado por engano. Mantem so o
-    # trimestre isolado (intervalo <= ~95 dias); pro 1o trimestre os dois coincidem.
-    dt_ini = pd.to_datetime(df['DT_INI_EXERC'])
-    dt_fim = pd.to_datetime(df['DT_FIM_EXERC'])
-    df = df[(dt_fim - dt_ini).dt.days <= 95]
+    if tipo == 'itr':
+        # a CVM reporta tanto o trimestre isolado (DT_INI_EXERC = inicio daquele trimestre)
+        # quanto o acumulado desde o inicio do ano (DT_INI_EXERC = 1o de janeiro) pro mesmo
+        # DT_REFER, a partir do 2o trimestre -- sem filtrar, pegariamos o acumulado por
+        # engano. Mantem so o trimestre isolado (intervalo <= ~95 dias); pro 1o trimestre os
+        # dois coincidem. O DFP (tipo='dfp') nao tem essa ambiguidade -- e sempre o ano
+        # inteiro (~365 dias), nao filtra.
+        dt_ini = pd.to_datetime(df['DT_INI_EXERC'])
+        dt_fim = pd.to_datetime(df['DT_FIM_EXERC'])
+        df = df[(dt_fim - dt_ini).dt.days <= 95]
     return df
 
 
@@ -102,6 +112,8 @@ def contas_por_periodo(df, cnpj, tp_periodo):
             # demonstracao (ninguem reporta "R$ 0,00065 mil por acao") -- so escala o resto.
             fator = 1 if row.CD_CONTA.startswith('3.99') else FATOR_ESCALA.get(row.ESCALA_MOEDA, 1)
             valor = None if pd.isna(row.VL_CONTA) else float(row.VL_CONTA) * fator
+            if valor is not None and row.CD_CONTA.startswith('3.99') and abs(valor) >= LIMITE_LPA:
+                valor = None
             contas.append({'cd_conta': row.CD_CONTA, 'ds_conta': row.DS_CONTA, 'vl_conta': valor})
         periodos.append((tp_periodo, date.fromisoformat(dt_referencia), contas))
     return periodos
@@ -112,15 +124,21 @@ def fetch_periodos_cvm(cnpj):
     # aos controladores, etc.); cai pro individual so nos periodos que faltarem no
     # consolidado -- empresa sem subsidiaria pra consolidar (Sanepar, Comgas, bancos
     # estaduais pequenos etc.) simplesmente nao tem "_con", so "_ind".
+    #
+    # ITR (trimestral) cobre 1T/2T/3T -- nao existe "4o ITR", a CVM so publica o ano inteiro
+    # via DFP (anual) depois do encerramento do exercicio. Grava o DFP com tp_periodo='ANUAL'
+    # (sem filtro de isolamento, ver carrega_ano) -- popula_dre.py deriva o 4T isolado por
+    # subtracao (Anual - 1T - 2T - 3T) na curadoria, ver comentario la.
     periodos_por_chave = {}
-    for ano in range(ANO_INICIAL, ANO_FINAL + 1):
-        df_con = carrega_ano('itr', ano, 'con')
-        for periodo in contas_por_periodo(df_con, cnpj, 'TRIMESTRAL'):
-            periodos_por_chave[periodo[1]] = periodo
-    for ano in range(ANO_INICIAL, ANO_FINAL + 1):
-        df_ind = carrega_ano('itr', ano, 'ind')
-        for periodo in contas_por_periodo(df_ind, cnpj, 'TRIMESTRAL'):
-            periodos_por_chave.setdefault(periodo[1], periodo)
+    for tipo, tp_periodo in (('itr', 'TRIMESTRAL'), ('dfp', 'ANUAL')):
+        for ano in range(ANO_INICIAL, ANO_FINAL + 1):
+            df_con = carrega_ano(tipo, ano, 'con')
+            for periodo in contas_por_periodo(df_con, cnpj, tp_periodo):
+                periodos_por_chave[(periodo[1], periodo[0])] = periodo
+        for ano in range(ANO_INICIAL, ANO_FINAL + 1):
+            df_ind = carrega_ano(tipo, ano, 'ind')
+            for periodo in contas_por_periodo(df_ind, cnpj, tp_periodo):
+                periodos_por_chave.setdefault((periodo[1], periodo[0]), periodo)
     return list(periodos_por_chave.values())
 
 

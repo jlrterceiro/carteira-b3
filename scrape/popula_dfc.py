@@ -78,8 +78,16 @@ def subtrai(a, b):
 def isola_trimestres(valores_por_chave):
     # agrupa por ano fiscal (assume ano civil, igual o resto do mercado B3) e ordena
     # cronologicamente dentro do ano -- 1o trimestre do ano fica como esta (YTD do 1T e o
-    # proprio 1T); os seguintes sao isolados subtraindo o YTD do trimestre anterior do mesmo
-    # ano. 4T fica de fora (precisaria do DFP anual, fora de escopo).
+    # proprio 1T); os seguintes (2T, 3T) sao isolados subtraindo o YTD do trimestre anterior
+    # do mesmo ano.
+    #
+    # O ANUAL (DFP, sempre o ultimo periodo do ano civil quando existe) gera DOIS registros:
+    # o proprio total anual (tp_periodo='ANUAL', sem nenhuma transformacao -- valor util por
+    # si so, ex: "fluxo de caixa operacional do ano inteiro") E, quando o periodo
+    # imediatamente anterior e especificamente o 3T (mes 9), o 4T isolado por subtracao do
+    # acumulado de 9 meses (tp_periodo='TRIMESTRAL', mesma logica do 2T/3T). Se faltar o 3T
+    # daquele ano (ITR nao entregue, falha de scraping etc.), so grava o ANUAL -- subtrair do
+    # periodo errado geraria um 4T silenciosamente errado.
     por_ano = {}
     for (dt_referencia, tp_periodo), valores in valores_por_chave.items():
         por_ano.setdefault(dt_referencia.year, []).append((dt_referencia, tp_periodo, valores))
@@ -88,13 +96,21 @@ def isola_trimestres(valores_por_chave):
     for ano, periodos in por_ano.items():
         periodos.sort(key=lambda p: p[0])
         anterior = None
+        anterior_dt = None
         for dt_referencia, tp_periodo, valores in periodos:
-            if anterior is None:
-                isolado = valores
+            if tp_periodo == 'ANUAL':
+                isolados[(dt_referencia, 'ANUAL')] = valores
+                if anterior is not None and anterior_dt.month == 9:
+                    isolados[(dt_referencia, 'TRIMESTRAL')] = {
+                        coluna: subtrai(valores[coluna], anterior[coluna]) for coluna in COLUNAS_TB_DFC
+                    }
+            elif anterior is None:
+                isolados[(dt_referencia, tp_periodo)] = valores
             else:
-                isolado = {coluna: subtrai(valores[coluna], anterior[coluna]) for coluna in COLUNAS_TB_DFC}
-            isolados[(dt_referencia, tp_periodo)] = isolado
-            anterior = valores
+                isolados[(dt_referencia, tp_periodo)] = {
+                    coluna: subtrai(valores[coluna], anterior[coluna]) for coluna in COLUNAS_TB_DFC
+                }
+            anterior, anterior_dt = valores, dt_referencia
     return isolados
 
 
