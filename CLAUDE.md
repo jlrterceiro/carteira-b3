@@ -281,6 +281,15 @@ técnicas/provisões de sinistro, não caixa livre. Confirmado em PSSA3 (minha s
 exato, `1.993.244.000`) e HAPV3 (`8.330.387.000`, também exato — plano de saúde usa
 contabilidade de seguro também, mesmo marcador detecta os dois).
 
+**Limitação conhecida, aceita de propósito (perfil seguradora, `vl_divida_total`)**: PSSA3
+continua com gap de ~85% contra o yfinance (R$126,4mi vs R$820,8mi) mesmo depois do fix do
+`vl_caixa` acima — "Empréstimos e Financiamentos" é genuinamente zero na CVM pra esse perfil
+(confirmado em `2.01.04`/`2.02.01`, ambos zero), e nenhuma outra conta soma exatamente
+R$820,8mi (testado contra "Passivos financeiros", "Passivos de contratos de seguros" e
+combinações — nenhuma bate). Diferente do achado do `vl_caixa` (uma conta especifica e
+exata), aqui não há candidato identificável — decisão tomada: manter como está em vez de
+arriscar uma soma especulativa sem fonte confirmada.
+
 `vl_patrimonio_liquido_total`/`vl_patrimonio_liquido`/`vl_participacao_nao_controladores`
 seguem o mesmo padrão da DRE (`vl_lucro_liquido_total`/`vl_lucro_liquido`) — "Patrimônio
 Líquido Consolidado" inclui participação de não controladores, confirmado em EVEN3 (total
