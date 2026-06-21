@@ -127,6 +127,32 @@ def filhos_diretos(contas, cd_pai):
     return [c for c in contas if c['cd_conta'].startswith(cd_pai + '.') and c['cd_conta'].count('.') == nivel_pai + 1]
 
 
+def receita_em_outras_operacionais(contas):
+    # achado validando contra o yfinance: em empresas onde 3.01 e genuinamente zero (sem
+    # venda de bens/servicos no sentido tradicional -- holdings, seguradoras de distribuicao),
+    # a receita real (comissao, prestacao de servico) as vezes fica dentro de "Outras Receitas
+    # Operacionais" (3.04.04) em vez de 3.01. Posicao inconsistente: as vezes numa conta-filha
+    # com "receita" no nome (CXSE3, UNIP3), as vezes na propria conta-pai sem filha informativa
+    # (TELB3, RPAD3) -- testa as duas, nessa ordem. So usa o texto "receita" (nunca pega
+    # "custo"/"despesa" da mesma sub-arvore por engano) e so quando a busca em 3.01 deu zero --
+    # holdings puras (BRAP3/4) ficam corretamente de fora, porque nenhuma conta sob 3.04.04
+    # tem "receita" no nome pra elas.
+    #
+    # Variante adicional achada testando a base inteira (RPAD3 2025-09-30): a conta-pai tem
+    # valor real (243.000) mas a unica filha com "receita" no nome vem ZERADA na propria CVM
+    # (mesma categoria do bug de split controlador/nao-controlador zerado, documentado acima,
+    # so que numa arvore diferente) -- usa a soma das filhas SO se ela for diferente de zero,
+    # senao cai pro valor da propria conta-pai.
+    candidatos = [f for f in filhos_diretos(contas, '3.04.04') if 'receita' in normaliza(f['ds_conta'])]
+    soma_filhos = soma(*(c['vl_conta'] for c in candidatos)) if candidatos else None
+    if soma_filhos:
+        return soma_filhos
+    pai = next((c for c in contas if c['cd_conta'] == '3.04.04'), None)
+    if pai and pai['vl_conta'] and 'receita' in normaliza(pai['ds_conta']):
+        return pai['vl_conta']
+    return None
+
+
 def extrai_lpa(contas, sg_classe):
     resultado = {}
     for prefixo, coluna in (('3.99.01', 'vl_lpa_basico'), ('3.99.02', 'vl_lpa_diluido')):
@@ -185,6 +211,10 @@ def extrai_wide(contas, perfil):
     # Diferido"), sem nenhuma linha combinada. Restrito a contas de grupo (nivel_superior) pra
     # nao casar com a sub-conta-filha "Provisao para imposto de renda" que existe DENTRO de
     # cada uma dessas (current e diferido), o que pegaria so um pedaco do efeito fiscal total.
+    if not valores['vl_receita_total']:
+        escondida = receita_em_outras_operacionais(contas)
+        if escondida:
+            valores['vl_receita_total'] = escondida
     grupo = nivel_superior(contas)
     valores['vl_impostos'] = acha(grupo, 'imposto de renda', 'contribuicao social', 'sobre o lucro')
     if valores['vl_impostos'] is None:

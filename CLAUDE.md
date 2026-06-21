@@ -512,21 +512,27 @@ lpa 3T = −614 → estimativa do 4T ≈ 5,2 milhões, estourando `NUMERIC(10,4)
 `INSERT`). Corrigida aplicando a mesma guarda `LIMITE_LPA` (≥10.000 em módulo → `NULL`) já
 usada em `extrai_lpa()`, agora também no valor derivado.
 
-**Limitação conhecida, aceita de propósito (validando contra o yfinance, 2ª rodada com 20
-ações novas)**: `vl_receita_total` (`por_codigo(contas, '3.01')`) fica zerado em 25 empresas
-— a própria conta `3.01` da CVM é zero pra elas, não é erro de extração. Mas dessas 25, pelo
-menos 4 (CXSE3, PSSA3, TELB3, UNIP3, confirmado contra o yfinance) têm receita real
-"escondida" dentro de `3.04.04` ("Outras Receitas Operacionais") — CXSE3: `41.891.000`
-("Receitas de Acesso à Rede e Uso da Marca") + `578.796.000` ("Receitas de prestação de
-serviços") = `620.687.000`, bate quase exato com o yfinance (`620.529.000`). Diferente de
-BRAP3/BRAP4 (Bradespar, holding pura — `3.04.04` genuinamente zerado, todo o resultado vem de
-`3.04.06` "Resultado de Equivalência Patrimonial") e de OSXB3, onde `vl_receita_total=0` está
-correto. Mesma categoria de instabilidade já aceita pro `vl_divida_total`/arrendamento acima:
-a posição varia até entre os 4 casos com receita real (às vezes na própria conta-pai sem
-filha informativa — TELB3, RPAD3; às vezes numa filha com "receita" no nome — CXSE3, UNIP3) e
-BBSE3 nem usa `3.04.04` pra isso (ali é "Despesas com Publicidade e Propaganda" — a receita
-real dela está em outra posição, não investigada). Decisão tomada: manter como está, mesmo
-risco já aceito acima.
+**Bug encontrado e corrigido (`vl_receita_total` zerado, achado validando contra o
+yfinance)**: `por_codigo(contas, '3.01')` ficava zerado em ~25 empresas — a própria conta
+`3.01` da CVM é zero pra elas, não é erro de extração, mas em pelo menos 20 dessas a receita
+real existe, só está "escondida" dentro de `3.04.04` ("Outras Receitas Operacionais") em vez
+de `3.01` (CXSE3: `41.891.000` "Receitas de Acesso à Rede e Uso da Marca" +
+`578.796.000` "Receitas de prestação de serviços" = `620.687.000`, bate quase exato com o
+yfinance, `620.529.000`). Corrigido com `receita_em_outras_operacionais()`: quando `3.01` é
+zero, soma as contas-filhas de `3.04.04` cujo texto contém "receita" (cobre CXSE3/UNIP3,
+posição em filha); se a soma vier zero (filha existe mas vem zerada na própria CVM — achado
+em RPAD3 2025-09-30: a única filha com "receita" no nome é `0`, mas a conta-pai tem o valor
+real, `243.000` — mesma categoria do bug de split controlador/não-controlador zerado
+documentado acima, só que numa árvore diferente), cai pro valor da própria conta-pai (cobre
+TELB3/RPAD3, posição direto na conta-pai sem filha informativa). Holdings puras (BRAP3/4,
+`3.04.04` genuinamente zero, resultado vem só de `3.04.06` "Resultado de Equivalência
+Patrimonial") e OSXB3 (`vl_receita_total=0` correto nalguns períodos) ficam corretamente de
+fora — nenhuma conta sob `3.04.04` tem "receita" no nome pra elas. **Limitação residual
+aceita**: ~16 empresas continuam com `vl_receita_total=0` onde isso é mesmo correto (holdings
+sem receita operacional) ou onde a receita real está em posição ainda mais inconsistente —
+BBSE3 nem usa `3.04.04` pra isso (ali é "Despesas com Publicidade e Propaganda"), não
+investigado por ser caso único, mesma decisão já aceita pro `vl_divida_total`/arrendamento
+acima.
 
 Duas decisões de modelagem:
 - `vl_receitas_financeiras`/`vl_despesas_financeiras` são confiáveis (reconciliam exatamente
