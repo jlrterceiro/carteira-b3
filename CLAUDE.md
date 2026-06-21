@@ -33,7 +33,7 @@ Se trocar a fonte de dados de cotação/balanço/etc no futuro, só precisa troc
 correspondente em `scrape/` — nada em `backend/` referencia yfinance ou dadosdemercado.com.br
 diretamente, só lê das tabelas.
 
-## Schema (public, 24 tabelas)
+## Schema (public, 26 tabelas)
 
 - `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
 - `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao` (histórico de preços diário)
@@ -50,12 +50,14 @@ diretamente, só lê das tabelas.
 - `tb_dre` — DRE (só ações), 15 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
 - `tb_dre_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM, sem curadoria, usada por `popula_dre.py` pra montar `tb_dre` (ver seção própria abaixo)
 - `tb_dre_old_yfinance` — histórica/descontinuada, DRE via yfinance, não recebe mais atualização (ver seção própria abaixo)
+- `tb_dfc` — demonstração de fluxo de caixa (só ações), 5 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
+- `tb_dfc_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM pro fluxo de caixa, sem curadoria, usada por `popula_dfc.py` pra montar `tb_dfc` (ver seção própria abaixo)
 - `tb_valor_mercado` — snapshot de valor de mercado por dia de raspagem (`fast_info.marketCap` do yfinance), histórico se constrói rodando o scraper periodicamente
 - `tb_ticker_historico` / `tb_corretora_historico` — mapeiam nomes antigos pra ids atuais (tickers trocados, corretoras renomeadas/fundidas)
 
 Volume em 2026-06-20: ~400 ativos, ~1100 operações, ~750 eventos corporativos, ~1,70M
 cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~15k linhas de balanço
-(CVM, TRIMESTRAL), ~15k linhas de DRE (CVM, TRIMESTRAL).
+(CVM, TRIMESTRAL), ~15k linhas de DRE (CVM, TRIMESTRAL), ~15k linhas de DFC (CVM, TRIMESTRAL).
 
 ## Scripts Python (`scrape/`)
 
@@ -66,6 +68,7 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~15k lin
 - `scraper_proventos.py <TICKER opcional>` — dividendos/JCP/rendimento via `yfinance` (`t.dividends`), valor bruto raw (sem distinguir tipo)
 - `scraper_balanco_patrimonial.py <TICKER opcional>` — raspagem crua do balanço via dados abertos da CVM, só ações, popula só `tb_balanco_conta` (ver seção própria abaixo). `popula_balanco.py <TICKER opcional>` — curadoria local (lê `tb_balanco_conta`, sem rede) que popula `tb_balanco_patrimonial`, mesmo padrão de separação do DRE. `scraper_qt_acoes.py <TICKER opcional>` — só atualiza `qt_acoes` em `tb_balanco_patrimonial` via yfinance (`Ordinary Shares Number`), `UPDATE`-only (nunca `INSERT`, a linha já existe via `popula_balanco.py`) — ver seção própria abaixo pro motivo. `scraper_balanco_patrimonial_old_yfinance.py` — histórico/descontinuado, não roda mais.
 - `scraper_dre.py <TICKER opcional>` — raspagem crua da DRE via dados abertos da CVM, só ações, popula só `tb_dre_conta` (ver seção própria abaixo). `popula_dre.py <TICKER opcional>` — curadoria local (lê `tb_dre_conta`, sem rede) que popula `tb_dre`; separado do scraper de propósito, pra corrigir bug de casamento sem precisar rebaixar nada da CVM. `scraper_dre_old_yfinance.py` — histórico/descontinuado, não roda mais (ver seção própria abaixo).
+- `scraper_dfc.py <TICKER opcional>` — raspagem crua do fluxo de caixa via dados abertos da CVM, só ações, popula só `tb_dfc_conta` (ver seção própria abaixo). `popula_dfc.py <TICKER opcional>` — curadoria local (lê `tb_dfc_conta`, sem rede) que popula `tb_dfc`, mesmo padrão de separação da DRE/balanço.
 - `scraper_valor_mercado.py <TICKER opcional>` — valor de mercado via yfinance (`fast_info.marketCap`), só ações, um snapshot por dia de execução.
 - `import_operacoes.py <arquivo.xlsx> <sg_usuario>` — importa export de negociação da B3 pra carteira `Carteira Aposentadoria` do usuário informado, dedup por (ativo, tipo, data, qtd, preço) contando ocorrências já existentes. Planilhas já importadas ficam em `scrape/importados/`.
 
@@ -290,6 +293,45 @@ algoritmicamente quais empresas são afetadas sem outra fonte, optou-se por não
 arquivo. Trade-off aceito: yfinance só cobre os últimos ~4-5 trimestres (ao contrário da CVM,
 que cobre desde 2011), então `qt_acoes` fica `NULL` pra períodos mais antigos — não afeta o
 trimestre mais recente, que é o que importa pra cálculo de valor por ação hoje.
+
+## Demonstração de fluxo de caixa (DFC)
+
+Mesma fonte (CVM) e mesmo pipeline em duas etapas da DRE/balanço
+(`scraper_dfc.py` cru → `tb_dfc_conta`, `popula_dfc.py` curadoria local sem rede → `tb_dfc`).
+A CVM publica ativo/passivo do fluxo de caixa em arquivos próprios: `DFC_MI` (Método
+Indireto, usado por quase toda empresa) com fallback pra `DFC_MD` (Método Direto, poucas
+empresas — ex: HAGA4) — mesma estrutura de `cd_conta` nos dois métodos, então o mesmo código
+de extração serve pra ambos. Mesmo fallback consolidado→individual da DRE/balanço.
+
+**Diferença importante em relação à DRE**: a CVM só publica o fluxo de caixa acumulado desde
+o início do ano fiscal (nunca o trimestre isolado, mesmo a partir do 2º trimestre — diferente
+da DRE, que publica os dois). `tb_dfc_conta` guarda o valor exatamente como vem (acumulado);
+`popula_dfc.py` isola o trimestre por subtração dentro do mesmo ano civil (1T fica como está,
+já que YTD do 1T é o próprio 1T; 2T = YTD 2T − YTD 1T; 3T = YTD 3T − YTD 2T) — assim
+`tp_periodo='TRIMESTRAL'` continua significando "só aquele trimestre" em toda a base, igual
+DRE/balanço. 4T fica de fora por enquanto (precisaria do DFP anual, fora de escopo, mesmo
+ponto pendente da DRE/balanço).
+
+**Curadoria mais simples que DRE/balanço**: a posição por `cd_conta` (`6.01` a `6.05`) é
+estável em todos os perfis testados, incluindo banco (BBAS3) e seguradora (BBSE3, só com o
+nome de `6.01` mudando pra "Caixa Líquido Atividades Seguradora/Resseguradora") — não
+precisou de detecção de perfil nem casamento por texto pros 5 totais, diferente da
+DRE/balanço.
+
+`vl_caixa_operacional + vl_caixa_investimento + vl_caixa_financiamento + vl_variacao_cambial`
+soma exatamente `vl_variacao_caixa` (identidade contábil) em 99,8% das linhas — usado como
+checagem de consistência na validação. Os ~0,2% que não batem são erro da própria fonte CVM,
+não da curadoria: confirmado em AXIA3 (3T22), onde o módulo bate exato mas o **sinal** de
+`6.05` vem invertido já no dado bruto (`6.01+6.02+6.03+6.04` = +3.921.783, `6.05` reportado
+= −3.921.783) — mesma categoria de anomalia pontual já documentada pra CMIG4 (DRE)/MRVE3
+(LPA), não dá pra "corrigir" de forma confiável sem arriscar mascarar um erro real em outro
+lugar.
+
+Capex (aquisição de imobilizado/intangível, sub-conta de `6.02`) ficou **fora** da curadoria
+de propósito — testado em EVEN3/VALE3/KLBN3, a posição e o texto variam bem mais que o resto
+do plano de contas (KLBN3 chega a ter capex florestal numa sub-conta separada da de
+imobilizado/intangível) — quem precisar de capex de uma empresa específica consulta
+`tb_dfc_conta` direto, calculando free cash flow manualmente a partir daí.
 
 ## Demonstração de resultado (DRE)
 
