@@ -140,6 +140,18 @@ def detecta_perfil(contas):
     conta_101 = next((c for c in contas if c['cd_conta'] == '1.01'), None)
     if conta_101 and 'caixa e equivalentes' in normaliza(conta_101['ds_conta']):
         return 'banco'
+    # seguradora (PSSA3, HAPV3 -- plano de saude usa contabilidade de seguro tambem) mantem o
+    # plano padrao (1.01 = "Ativo Circulante" normal), mas "Aplicacoes Financeiras" (1.01.02)
+    # e majoritariamente float de reservas tecnicas/provisoes de sinistro, nao caixa livre --
+    # achado validando vl_caixa contra o yfinance (PSSA3: minha soma de 1.01.01+1.01.02 ficava
+    # 554% maior que o yfinance, que conta so 1.01.01). Marcador: presenca de "Passivos do
+    # contrato de seguro/resseguro" em qualquer posicao do plano de contas -- so 3 ativos tem
+    # esse texto (BBAS3, HAPV3, PSSA3); BBAS3 ja cai no perfil 'banco' antes desse check.
+    if any(
+        'contrato de seguro' in normaliza(c['ds_conta']) or 'contrato de resseguro' in normaliza(c['ds_conta'])
+        for c in contas
+    ):
+        return 'seguradora'
     return 'padrao'
 
 
@@ -182,17 +194,25 @@ def extrai_wide(contas, perfil):
         valores['vl_ativo_circulante'] = ativo_circulante
         valores['vl_passivo_circulante'] = passivo_circulante
         valores['vl_capital_giro'] = subtrai(ativo_circulante, passivo_circulante)
-        # algumas empresas (25 confirmadas, ex: LOGG3) escondem um valor de "Titulos e
-        # Valores Mobiliarios" dentro de "Outros Ativos Circulantes" (1.01.08) em vez da
-        # linha padrao de Aplicacoes Financeiras (1.01.02) -- economicamente e a mesma coisa
-        # (titulo/aplicacao de curto prazo), e o yfinance inclui esse valor no "caixa" dele;
-        # sem somar aqui, vl_caixa ficava ~90% menor que o real pra essas empresas (achado
-        # validando contra o yfinance: LOGG3 1T26, 7.405+43.036+339.582 = 390.023 mil, bate
-        # exato com o yfinance). Restrito ao ramo 1.01.08 de proposito -- o mesmo texto
-        # aparece tambem dentro de 1.01.01/1.01.02 (ja contado, seria duplicar) e de 1.01.03
-        # "Contas a Receber" (nao e caixa, e recebivel).
-        titulos_em_outros = acha([c for c in contas if c['cd_conta'].startswith('1.01.08')], 'titulos e valores mobiliarios')
-        valores['vl_caixa'] = soma(por_codigo(contas, '1.01.01'), por_codigo(contas, '1.01.02'), titulos_em_outros)
+        if perfil == 'seguradora':
+            # so o caixa estreito (1.01.01) -- "Aplicacoes Financeiras" (1.01.02) pra esse
+            # perfil e majoritariamente float de reservas tecnicas/provisoes de sinistro, nao
+            # caixa livre (achado validando contra o yfinance: PSSA3, minha soma de
+            # 1.01.01+1.01.02 ficava 554% maior que o yfinance, que conta so 1.01.01).
+            valores['vl_caixa'] = por_codigo(contas, '1.01.01')
+        else:
+            # algumas empresas (25 confirmadas, ex: LOGG3) escondem um valor de "Titulos e
+            # Valores Mobiliarios" dentro de "Outros Ativos Circulantes" (1.01.08) em vez da
+            # linha padrao de Aplicacoes Financeiras (1.01.02) -- economicamente e a mesma
+            # coisa (titulo/aplicacao de curto prazo), e o yfinance inclui esse valor no
+            # "caixa" dele; sem somar aqui, vl_caixa ficava ~90% menor que o real pra essas
+            # empresas (achado validando contra o yfinance: LOGG3 1T26,
+            # 7.405+43.036+339.582 = 390.023 mil, bate exato com o yfinance). Restrito ao
+            # ramo 1.01.08 de proposito -- o mesmo texto aparece tambem dentro de
+            # 1.01.01/1.01.02 (ja contado, seria duplicar) e de 1.01.03 "Contas a Receber"
+            # (nao e caixa, e recebivel).
+            titulos_em_outros = acha([c for c in contas if c['cd_conta'].startswith('1.01.08')], 'titulos e valores mobiliarios')
+            valores['vl_caixa'] = soma(por_codigo(contas, '1.01.01'), por_codigo(contas, '1.01.02'), titulos_em_outros)
         # restringe por prefixo de cd_conta -- "Emprestimos e Financiamentos" existe em
         # 2.01 (circulante) E 2.02 (nao circulante) com a MESMA profundidade (2 pontos), sem
         # restringir o acha() poderia empatar e pegar a conta errada.

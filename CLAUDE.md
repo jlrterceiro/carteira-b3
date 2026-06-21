@@ -269,6 +269,18 @@ que a DRE não tinha: seguradoras (BBSE3) seguem o plano padrão (têm Ativo/Pas
 normal) mas genuinamente não têm linha de "Empréstimos e Financiamentos" — `vl_divida_total`
 fica `NULL` só pra esse caso, também não é bug.
 
+**Bug encontrado e corrigido (`vl_caixa` de seguradora, achado validando contra o
+yfinance)**: `detecta_perfil()` agora detecta um terceiro perfil, `'seguradora'` (marcador:
+presença de "Passivos do contrato de seguro/resseguro" em qualquer posição do plano de
+contas — só 3 ativos têm esse texto, BBAS3/HAPV3/PSSA3; BBAS3 já cai em `'banco'` antes desse
+check). Mantém o plano padrão pra `vl_ativo_circulante`/`vl_divida_total`/etc, mas
+`vl_caixa` usa só `1.01.01` ("Caixa e Equivalentes de Caixa"), sem somar `1.01.02`
+("Aplicações Financeiras") — pra esse perfil, essa conta é majoritariamente float de reservas
+técnicas/provisões de sinistro, não caixa livre. Confirmado em PSSA3 (minha soma de
+`1.01.01+1.01.02` ficava 554% maior que o yfinance, que conta só `1.01.01`; com o fix bate
+exato, `1.993.244.000`) e HAPV3 (`8.330.387.000`, também exato — plano de saúde usa
+contabilidade de seguro também, mesmo marcador detecta os dois).
+
 `vl_patrimonio_liquido_total`/`vl_patrimonio_liquido`/`vl_participacao_nao_controladores`
 seguem o mesmo padrão da DRE (`vl_lucro_liquido_total`/`vl_lucro_liquido`) — "Patrimônio
 Líquido Consolidado" inclui participação de não controladores, confirmado em EVEN3 (total
