@@ -356,6 +356,21 @@ ali). Confirmado em ITSA4 (12.161.000.000, bate exato com o yfinance) e PFRM3
 fora — confirmado em SOND6 e NORD3, que usam essas frases e continuam com gap; risco de pegar
 conta errada generalizando mais que isso ainda supera o ganho.
 
+**Bug encontrado e corrigido (`vl_divida_total` com "Empréstimos e Financiamentos" escondido
+fora da posição padrão, achado validando os ~380 ativos inteiros contra o yfinance, não só
+amostra)**: mesma categoria do bug de arrendamento acima, mas pra divida principal — em
+algumas empresas a conta de dívida de verdade mora dentro da árvore de "Outros Passivos"
+(`2.01.05.02.x`/`2.02.02.02.x`, mesmas posições do arrendamento) em vez de `2.01.04`/`2.02.01`,
+que ficam genuinamente zerados. Confirmado exato em ALOS3 (`2.01.05.02.05`+`2.02.02.02.07` =
+258.964.000+5.556.680.000 = 5.815.644.000, somado ao arrendamento já capturado dá
+6.029.867.000, bate exato com o yfinance) e ~99% em FHER3/WDCN3 (dentro de margem de
+arredondamento). Corrigido com `emprestimos_fora_posicao_padrao()`: restrito à frase composta
+"emprestimo(s)" E "financiamento(s)" juntos no mesmo texto (família limpa, 10 ações: ALOS3,
+FHER3, IRBR3, MRVE3, PEAB3/4, SHOW3, TELB3/4, WDCN3) — não generaliza pra variantes de uma
+palavra só ("Encargos sobre empréstimos", "Compromissos de empréstimos", "Debêntures"
+isoladas, todas com significado contábil diferente), mesma restrição a contas-folha e exclusão
+de `2.01.04`/`2.02.01` do fix de arrendamento.
+
 `vl_valor_patrimonial_tangivel` calculado como `vl_patrimonio_liquido - "Intangível"` (texto)
 — a CVM não tem uma linha pronta de "tangible book value" como o yfinance tinha.
 
@@ -557,7 +572,12 @@ que a CVM reporta explicitamente em "Atribuído aos Sócios da Empresa Controlad
 mostre um número diferente (ele deriva por subtração, `Total − Não Controladores`, que dá
 outro resultado quando a fonte não reconcilia). Mesma categoria de anomalia pontual já
 documentada pra CMIG4 (DRE)/MRVE3 (LPA)/AXIA3 (DFC, ver seção própria) — não dá pra
-"corrigir" sem arriscar mascarar um erro real em outro lugar.
+"corrigir" sem arriscar mascarar um erro real em outro lugar. Mais dois casos achados na
+validação completa contra o yfinance: TFCO4 1T26 (`3.11.01`=0, `3.11.02`=−142.000, não soma
+com o total de 34.401.000) e BOBR4 (`3.11.01`=20.635.000, `3.11.02`=0, total=27.188.000, gap
+de R$6,55mi) — nenhum dos dois se encaixa nos 3 fallbacks já implementados (nem zerados nem
+≈total nem sinal trocado), mesma decisão: usar o valor literal de "Atribuído aos Controladores"
+sem forçar ajuste especulativo.
 
 **Bug encontrado e corrigido (split controlador/não-controlador com sinal trocado, achado
 validando contra o yfinance, 7ª rodada com 20 ações novas)**: terceira variante da família de

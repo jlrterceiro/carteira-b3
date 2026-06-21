@@ -132,6 +132,34 @@ def passivo_arrendamento_fora_emprestimos(contas):
     return soma(*(c['vl_conta'] for c in candidatos)) if candidatos else None
 
 
+def emprestimos_fora_posicao_padrao(contas):
+    # achado validando vl_divida_total contra o yfinance numa rodada de verificacao completa
+    # (todos os ~380 ativos, nao so amostra): em algumas empresas a divida real ("Emprestimos
+    # e Financiamentos"/"Emprestimos, financiamentos e debentures") mora FORA da posicao
+    # padrao 2.01.04/2.02.01, escondida dentro da arvore de "Outros Passivos" (mesma familia
+    # de posicao do bug de arrendamento acima, 2.01.05.02.x/2.02.02.02.x) -- 2.01.04/2.02.01
+    # ficam genuinamente zerados nesses casos. Confirmado em ALOS3 (2.01.05.02.05 +
+    # 2.02.02.02.07 = 258.964.000 + 5.556.680.000 = 5.815.644.000; somado ao arrendamento ja
+    # capturado, 214.223.000, bate EXATO com o yfinance, 6.029.867.000) e aproximado em FHER3/
+    # WDCN3 (~99% do gap, dentro de margem de arredondamento). Restrito a frase composta
+    # "emprestimo(s)" E "financiamento(s)" juntos no mesmo texto (familia limpa, 10 acoes:
+    # ALOS3, FHER3, IRBR3, MRVE3, PEAB3/4, SHOW3, TELB3/4, WDCN3) -- nao generaliza pra
+    # variantes de uma palavra so ("Encargos sobre emprestimos", "Compromissos de
+    # emprestimos", "Debentures" isoladas, todas com significado diferente). Mesma restricao a
+    # contas-folha e exclusao de 2.01.04/2.02.01 do fix de arrendamento, mesma razao.
+    todos_cd = {c['cd_conta'] for c in contas}
+    candidatos = [
+        c
+        for c in contas
+        if c['cd_conta'].startswith('2.')
+        and not (c['cd_conta'].startswith('2.01.04') or c['cd_conta'].startswith('2.02.01'))
+        and 'emprestimo' in normaliza(c['ds_conta'])
+        and 'financiamento' in normaliza(c['ds_conta'])
+        and not any(outro.startswith(c['cd_conta'] + '.') for outro in todos_cd)
+    ]
+    return soma(*(c['vl_conta'] for c in candidatos)) if candidatos else None
+
+
 def detecta_perfil(contas):
     # banco "de deposito" (BBAS3, BPAC3 etc.) usa um plano de contas sem o conceito de
     # circulante/nao circulante -- cd_conta '1.01' e "Caixa e Equivalentes de Caixa" em vez
@@ -219,7 +247,8 @@ def extrai_wide(contas, perfil):
         divida_circulante = acha([c for c in contas if c['cd_conta'].startswith('2.01')], 'emprestimos e financiamentos')
         divida_nao_circulante = acha([c for c in contas if c['cd_conta'].startswith('2.02')], 'emprestimos e financiamentos')
         arrendamento = passivo_arrendamento_fora_emprestimos(contas)
-        valores['vl_divida_total'] = soma(divida_circulante, divida_nao_circulante, arrendamento)
+        emprestimos_escondidos = emprestimos_fora_posicao_padrao(contas)
+        valores['vl_divida_total'] = soma(divida_circulante, divida_nao_circulante, arrendamento, emprestimos_escondidos)
 
     valores['vl_divida_liquida'] = subtrai(valores['vl_divida_total'], valores['vl_caixa'])
     return valores
