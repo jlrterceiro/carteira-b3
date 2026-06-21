@@ -80,6 +80,18 @@ def fetch_periodos_locais(conn, id_ativo):
     return [(tp_periodo, dt_referencia, contas) for (dt_referencia, tp_periodo), contas in periodos.items()]
 
 
+def chave_ordenacao_conta(cd_conta):
+    # profundidade ascendente (prefere conta mais "resumo"/proxima da raiz), e dentro do
+    # mesmo nivel, cd_conta numerico DESCENDENTE -- algumas empresas (achado em BBAS3)
+    # repetem o mesmo texto de conta ("Atribuido aos Socios da Empresa Controladora") em
+    # mais de um nivel da hierarquia (ex: 3.09.01 E 3.11.01), com a ocorrencia mais cedo
+    # zerada (so um campo estrutural do formulario, sem valor real preenchido) e a real
+    # ficando na ocorrencia de cd_conta mais alto -- preferir o cd_conta mais alto entre
+    # empates de profundidade pega a conta "final" certa.
+    partes = tuple(int(p) for p in cd_conta.split('.'))
+    return (len(partes), tuple(-p for p in partes))
+
+
 def acha(contas, *frases, excluir=()):
     candidatos = []
     for c in contas:
@@ -88,7 +100,7 @@ def acha(contas, *frases, excluir=()):
             candidatos.append(c)
     if not candidatos:
         return None
-    candidatos.sort(key=lambda c: c['cd_conta'].count('.'))
+    candidatos.sort(key=lambda c: chave_ordenacao_conta(c['cd_conta']))
     return candidatos[0]['vl_conta']
 
 

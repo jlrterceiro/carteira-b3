@@ -14,6 +14,12 @@
 --
 -- ds_origem e sempre 'CVM' (sem fallback de outra fonte, diferente de tb_balanco_patrimonial).
 -- Sem fn_popula_* -- raspagem direta, nao depende de outra tabela do projeto.
+--
+-- vl_conta e NUMERIC(20,4) (nao 20,2) -- as contas de LPA (3.99.*) sao valores pequenos com
+-- 4 casas decimais relevantes (ex: 0.3934); com so 2 casas, perderia precisao silenciosamente
+-- (0.3934 arredondaria pra 0.39, erro de ~1% sem nenhum aviso). Achado depois de comparar a
+-- curadoria contra um valor ja validado manualmente (ITSA4) e ver o LPA mudar de 0.3934 pra
+-- 0.3900 -- o resto das contas (totais monetarios grandes) nao e afetado por essa diferenca.
 
 CREATE TABLE public.tb_dre_conta (
     id_dre_conta SERIAL PRIMARY KEY,
@@ -22,7 +28,7 @@ CREATE TABLE public.tb_dre_conta (
     tp_periodo TEXT NOT NULL CHECK (tp_periodo IN ('ANUAL', 'TRIMESTRAL')),
     cd_conta TEXT NOT NULL,
     ds_conta TEXT NOT NULL,
-    vl_conta NUMERIC(20,2),
+    vl_conta NUMERIC(20,4),
     ds_origem TEXT NOT NULL DEFAULT 'CVM',
     dh_criacao TIMESTAMP NOT NULL DEFAULT now(),
     UNIQUE (id_ativo, dt_referencia, tp_periodo, cd_conta)

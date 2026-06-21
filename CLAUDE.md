@@ -389,6 +389,31 @@ BPAC3) — mapear por posição fixa não generaliza nem dentro do "perfil banco
 3.05 (`acha()`); só as posições 3.01-3.04 (receita/custo/lucro bruto/despesas operacionais)
 são estruturalmente estáveis nos dois perfis e usadas por `cd_conta` direto.
 
+**Bug encontrado e corrigido (empate de profundidade no `acha()`)**: o desempate original
+escolhia a conta de `cd_conta` mais BAIXO entre candidatos no mesmo nível de profundidade —
+quebrou em BBAS3, que repete o texto "Atribuído aos Sócios da Empresa Controladora" em DOIS
+níveis da hierarquia (`3.09.01`, intermediário "antes das Participações Estatutárias", com
+valor zerado — só um campo estrutural do formulário, sem dado real — E `3.11.01`, o final de
+fato, com o valor real). O desempate por `cd_conta` mais baixo pegava o `3.09.01` zerado,
+gerando `vl_lucro_liquido=0` mesmo com `vl_lucro_liquido_total` preenchido. Corrigido pra
+desempatar pelo `cd_conta` mais ALTO entre empates (mais "final"/downstream na demonstração)
+— afetou 827 linhas em 144 tickers diferentes depois de reprocessar a base inteira. Mesma
+correção replicada em `popula_balanco.py` (`chave_ordenacao_conta()`, idêntica nos dois
+arquivos) por precaução, embora nenhuma duplicata real tenha aparecido lá além do caso já
+tratado (`emprestimos e financiamentos` em `2.01.04`/`2.02.01`, já restrito por prefixo de
+`cd_conta` antes de chamar `acha()`). `popula_dfc.py` não usa casamento por texto, não é
+afetado por essa classe de bug.
+
+**Bug encontrado e corrigido (precisão de `tb_dre_conta.vl_conta`)**: a coluna era
+`NUMERIC(20,2)` (2 casas decimais) — suficiente pra contas monetárias grandes, mas o LPA
+(`3.99.*`) é um valor pequeno com 4 casas decimais relevantes (ex: R$0,3934/ação). Com só 2
+casas, o valor era arredondado silenciosamente na raspagem (R$0,3934 virava R$0,39, erro de
+~1% sem nenhum aviso) — achado comparando a curadoria contra um valor de LPA já validado
+manualmente pra ITSA4. Corrigido pra `NUMERIC(20,4)`; precisou reraspar `tb_dre_conta` por
+completo (não só reprocessar a curadoria) já que o valor já tinha sido truncado na escrita
+original. `tb_balanco_conta`/`tb_dfc_conta` não têm esse problema — nenhuma das duas
+demonstrações guarda valor por ação.
+
 Duas decisões de modelagem:
 - `vl_receitas_financeiras`/`vl_despesas_financeiras` são confiáveis (reconciliam exatamente
   com `vl_resultado_financeiro`, testado em EVEN3: 35.160 − 11.036 = 24.124) — diferente do

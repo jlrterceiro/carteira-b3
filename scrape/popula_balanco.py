@@ -70,6 +70,16 @@ def fetch_periodos_locais(conn, id_ativo):
     return [(tp_periodo, dt_referencia, contas) for (dt_referencia, tp_periodo), contas in periodos.items()]
 
 
+def chave_ordenacao_conta(cd_conta):
+    # profundidade ascendente, e dentro do mesmo nivel, cd_conta numerico DESCENDENTE --
+    # mesma correcao aplicada em popula_dre.py: algumas empresas repetem o mesmo texto de
+    # conta em mais de um nivel da hierarquia, com a ocorrencia mais cedo zerada (campo
+    # estrutural sem valor real) -- preferir o cd_conta mais alto entre empates pega a
+    # ocorrencia "final" certa.
+    partes = tuple(int(p) for p in cd_conta.split('.'))
+    return (len(partes), tuple(-p for p in partes))
+
+
 def acha(contas, *frases, excluir=()):
     candidatos = []
     for c in contas:
@@ -78,7 +88,7 @@ def acha(contas, *frases, excluir=()):
             candidatos.append(c)
     if not candidatos:
         return None
-    candidatos.sort(key=lambda c: c['cd_conta'].count('.'))
+    candidatos.sort(key=lambda c: chave_ordenacao_conta(c['cd_conta']))
     return candidatos[0]['vl_conta']
 
 
