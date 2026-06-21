@@ -252,6 +252,25 @@ def extrai_wide(contas, perfil):
         # rotulos das duas sub-contas vieram trocados na propria fonte pra esses periodos
         # especificos -- usa o total tambem, mesma razao do fallback acima.
         valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
+    elif (
+        valores['vl_lucro_liquido']
+        and valores['vl_lucro_liquido_total']
+        and not valores['vl_participacao_nao_controladores']
+        and (valores['vl_lucro_liquido'] > 0) != (valores['vl_lucro_liquido_total'] > 0)
+        and abs(abs(valores['vl_lucro_liquido']) - abs(valores['vl_lucro_liquido_total']))
+        < 0.01 * abs(valores['vl_lucro_liquido_total'])
+    ):
+        # terceira variante achada validando contra o yfinance: sem participacao de
+        # nao-controladores (0 ou ausente), "atribuido aos controladores" vem com o MESMO
+        # valor em modulo do total, mas com o SINAL TROCADO na propria CVM -- confirmado em
+        # AMER3 1T26 (total=-329.000.000, controladores=+329.000.000) e EPAR3 2023-06-30
+        # (total=13.363.000, controladores=-13.363.000). Tolerancia de 1% pra nao acertar por
+        # acaso outros 18 casos parecidos na base que tem sinal trocado mas magnitude bem
+        # diferente (AZUL3, BDLL3/4, CTAX3, NEXP3 etc.) -- esses sao um problema relacionado
+        # mas distinto (provavelmente casamento de texto pegando a conta errada, nao
+        # sinal trocado na fonte) e ficam de fora de proposito, mesmo raciocinio de nao
+        # arriscar um fix especulativo sem confirmar o padrao exato.
+        valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
     if perfil == 'banco':
         # banco nao tem resultado financeiro separado -- a intermediacao financeira (3.01-3.03)
         # JA E o resultado financeiro, nao existe desmembramento em receita/despesa financeira

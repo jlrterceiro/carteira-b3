@@ -559,6 +559,19 @@ outro resultado quando a fonte não reconcilia). Mesma categoria de anomalia pon
 documentada pra CMIG4 (DRE)/MRVE3 (LPA)/AXIA3 (DFC, ver seção própria) — não dá pra
 "corrigir" sem arriscar mascarar um erro real em outro lugar.
 
+**Bug encontrado e corrigido (split controlador/não-controlador com sinal trocado, achado
+validando contra o yfinance, 7ª rodada com 20 ações novas)**: terceira variante da família de
+bugs de split — sem participação de não-controladores (0 ou ausente), "Atribuído aos
+Controladores" vem com o MESMO valor em módulo do total, mas com o **sinal trocado** já na
+própria CVM. Confirmado em AMER3 1T26 (total=−329.000.000, controladores=+329.000.000) e
+EPAR3 2023-06-30 (total=13.363.000, controladores=−13.363.000). Corrigido com o mesmo
+fallback (usa o total), restrito a tolerância de 1% de diferença de módulo — existem mais 17
+linhas na base com sinal trocado e participação de não-controladores zerada/ausente (AZUL3,
+BDLL3/4, CTAX3, NEXP3 e outras), mas nessas a magnitude diverge bastante entre `vl_lucro_liquido`
+e o total (não é só o sinal trocado) — ficam de fora de propósito, provavelmente um problema
+relacionado mas distinto (casamento de texto pegando a conta errada), sem padrão exato
+identificável pra arriscar um fix especulativo.
+
 **Bug encontrado e corrigido (overflow na estimativa de LPA do 4T)**: a estimativa de LPA do
 4T (`lucro_líquido_4T × lpa_3T ÷ lucro_líquido_3T`, ver acima) explode quando
 `lucro_líquido_3T` é próximo de zero — confirmado em SOND5 (2012-09-30: lucro 3T = −R$12 mil,
