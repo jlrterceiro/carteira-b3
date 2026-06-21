@@ -69,7 +69,15 @@ lucro_5anos AS (
     GROUP BY id_ativo
 ),
 dividendos_5anos AS (
-    SELECT id_ativo, SUM(vl_unitario_ajustado) / 5.0 AS dividendo_anual_medio
+    -- vl_unitario (raw do yfinance), NAO vl_unitario_ajustado: vl_unitario ja vem ajustado
+    -- pra baixo pelo proprio yfinance refletindo splits/grupamentos que aconteceram DEPOIS
+    -- daquela data -- ou seja, ja esta na mesma base de "quantidade de acoes de hoje" que o
+    -- preco atual usa. vl_unitario_ajustado faz o INVERSO (recupera o valor historico REAL
+    -- pago na epoca, em acoes de entao) -- usar esse aqui superestimaria o yield de qualquer
+    -- empresa que fez bonificacao/grupamento no periodo (confirmado em BBDC4 2021: vl_unitario
+    -- 0,015681 vs vl_unitario_ajustado 0,018974, ~21% maior, batendo com 2 eventos de 1,1x
+    -- ocorridos depois).
+    SELECT id_ativo, SUM(vl_unitario) / 5.0 AS dividendo_anual_medio
     FROM tb_provento
     WHERE dt_ex >= CURRENT_DATE - INTERVAL '5 years'
     GROUP BY id_ativo
