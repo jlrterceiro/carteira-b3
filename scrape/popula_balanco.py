@@ -108,6 +108,30 @@ def subtrai(a, b):
     return a - b
 
 
+def passivo_arrendamento_fora_emprestimos(contas):
+    # achado validando vl_divida_total contra o yfinance: "Passivos de Arrendamentos" (IFRS
+    # 16) mora numa posicao TOTALMENTE diferente de "Emprestimos e Financiamentos" em varias
+    # empresas (ITSA4: 2.01.05.02.05 + 2.02.02.02.04 = 62.000.000 + 878.000.000 = 940.000.000,
+    # bate exato com o gap contra o yfinance). Restrito a frase "passivo(s) de
+    # arrendamento(s)" (familia de texto limpa e isolada, ~31 empresas) -- as outras ~111
+    # variacoes de "arrendamento" (arrendamento mercantil, financiamento por arrendamento
+    # etc.) ficam de fora de proposito, mesma decisao ja documentada acima (texto/posicao
+    # variam demais nessas pra confiar numa heuristica generica). Restrito a contas-folha (sem
+    # filhos) pra nao somar uma conta-pai E suas filhas juntas; exclui 2.01.04/2.02.01 pra nao
+    # duplicar o que ja entra em divida_circulante/divida_nao_circulante acima.
+    todos_cd = {c['cd_conta'] for c in contas}
+    candidatos = [
+        c
+        for c in contas
+        if c['cd_conta'].startswith('2.')
+        and not (c['cd_conta'].startswith('2.01.04') or c['cd_conta'].startswith('2.02.01'))
+        and 'passivo' in normaliza(c['ds_conta'])
+        and 'arrendamento' in normaliza(c['ds_conta'])
+        and not any(outro.startswith(c['cd_conta'] + '.') for outro in todos_cd)
+    ]
+    return soma(*(c['vl_conta'] for c in candidatos)) if candidatos else None
+
+
 def detecta_perfil(contas):
     # banco "de deposito" (BBAS3, BPAC3 etc.) usa um plano de contas sem o conceito de
     # circulante/nao circulante -- cd_conta '1.01' e "Caixa e Equivalentes de Caixa" em vez
@@ -174,7 +198,8 @@ def extrai_wide(contas, perfil):
         # restringir o acha() poderia empatar e pegar a conta errada.
         divida_circulante = acha([c for c in contas if c['cd_conta'].startswith('2.01')], 'emprestimos e financiamentos')
         divida_nao_circulante = acha([c for c in contas if c['cd_conta'].startswith('2.02')], 'emprestimos e financiamentos')
-        valores['vl_divida_total'] = soma(divida_circulante, divida_nao_circulante)
+        arrendamento = passivo_arrendamento_fora_emprestimos(contas)
+        valores['vl_divida_total'] = soma(divida_circulante, divida_nao_circulante, arrendamento)
 
     valores['vl_divida_liquida'] = subtrai(valores['vl_divida_total'], valores['vl_caixa'])
     return valores

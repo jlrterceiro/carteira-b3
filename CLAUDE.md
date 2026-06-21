@@ -304,16 +304,24 @@ em vez de nulificar; mantido aqui pela mesma razão, só que agora com uma base 
 de passivos financeiros da CVM em vez do número opaco do yfinance). `vl_divida_liquida`
 SEMPRE calculada como `vl_divida_total - vl_caixa`.
 
-**Limitação conhecida, aceita de propósito (validando contra o yfinance)**: `vl_divida_total`
-pro perfil padrão fica ~5-10% menor que o yfinance em várias empresas (confirmado em ITSA4:
-gap de R$940mi bate exato com "Passivos de Arrendamentos" em `2.01.05.02.05`+`2.02.02.02.04` —
-posições fora do ramo `2.01.04`/`2.02.01` que a curadoria já soma). Diferente do achado do
-`vl_caixa` acima (frase única, posição única, fácil de generalizar), o texto de arrendamento
-mercantil tem **112 variações diferentes** espalhadas por posições inconsistentes entre
-empresas (incluindo erros de digitação na própria base, ex: "arrendamento merncatil") — mesma
-categoria de instabilidade já aceita pro capex do DFC (ver seção própria). Decisão tomada:
-manter como está, sem tentar casar por texto — o risco de pegar conta errada numa empresa
-qualquer supera o ganho de fechar esse gap em algumas.
+**Bug encontrado e corrigido (`vl_divida_total` faltando arrendamento mercantil, achado
+validando contra o yfinance)**: pro perfil padrão, `vl_divida_total` ficava ~5-10% menor que
+o yfinance em várias empresas (confirmado em ITSA4: gap de R$940mi bate exato com "Passivos
+de Arrendamentos" em `2.01.05.02.05`+`2.02.02.02.04` — posições fora do ramo
+`2.01.04`/`2.02.01` que a curadoria já soma). O texto de arrendamento mercantil tem **112
+variações diferentes** espalhadas por posições inconsistentes entre empresas (incluindo erros
+de digitação na própria base, ex: "arrendamento merncatil") — mesma categoria de instabilidade
+já aceita pro capex do DFC (ver seção própria), arriscado demais generalizar pra todas.
+Corrigido com `passivo_arrendamento_fora_emprestimos()`: restrito só à família de texto
+"passivo(s) de arrendamento(s)" (contém "passivo" E "arrendamento", em qualquer ordem/posição
+relativa — cobre "passivo de arrendamento", "passivos de arrendamentos", "passivo por
+arrendamento" etc., 87 ativos afetados), só em contas-folha (sem filhos, pra não somar
+conta-pai e filha juntas) fora de `2.01.04`/`2.02.01` (pra não duplicar o que já é somado
+ali). Confirmado em ITSA4 (12.161.000.000, bate exato com o yfinance) e PFRM3
+(1.599.043.000, bate exato). **Limitação residual aceita**: as outras ~111 variações de texto
+("arrendamento mercantil", "arrendamentos a pagar" etc., sem a palavra "passivo") continuam de
+fora — confirmado em SOND6 e NORD3, que usam essas frases e continuam com gap; risco de pegar
+conta errada generalizando mais que isso ainda supera o ganho.
 
 `vl_valor_patrimonial_tangivel` calculado como `vl_patrimonio_liquido - "Intangível"` (texto)
 — a CVM não tem uma linha pronta de "tangible book value" como o yfinance tinha.
