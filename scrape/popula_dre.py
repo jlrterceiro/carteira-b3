@@ -193,6 +193,19 @@ def extrai_wide(contas, perfil):
         # sem subsidiaria pra consolidar, nao existe linha "atribuido a controladores" --
         # todo o resultado e da propria empresa, sem split de participacao minoritaria
         valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
+    elif (
+        valores['vl_lucro_liquido'] == 0
+        and valores['vl_participacao_nao_controladores'] == 0
+        and valores['vl_lucro_liquido_total']
+    ):
+        # achado em CAMB3/CGRA4/VSTE3/RECV3 e outras 137 acoes (1001 linhas no total): a
+        # empresa as vezes preenche as DUAS sub-contas de split ("atribuido aos
+        # controladores"/"nao controladores") com 0, em vez de deixar de fora ou preencher o
+        # total inteiro em "controladores" -- a propria CVM nao reconcilia (0+0 != total) nesse
+        # caso, sinal de que nao ha participacao minoritaria real e o formulario so nao foi
+        # preenchido. Mesmo fallback do caso "conta nao existe" acima, so que aqui a conta
+        # EXISTE com valor 0 em vez de ausente.
+        valores['vl_lucro_liquido'] = valores['vl_lucro_liquido_total']
     if perfil == 'banco':
         # banco nao tem resultado financeiro separado -- a intermediacao financeira (3.01-3.03)
         # JA E o resultado financeiro, nao existe desmembramento em receita/despesa financeira
@@ -242,7 +255,15 @@ def deriva_quarto_trimestre(valores_por_periodo):
                 lucro_liquido_3t = terceiro_trimestre['vl_lucro_liquido']
                 lucro_liquido_4t = derivado['vl_lucro_liquido']
                 if lpa_3t and lucro_liquido_3t and lucro_liquido_4t is not None:
-                    derivado[coluna] = lucro_liquido_4t * lpa_3t / lucro_liquido_3t
+                    estimado = lucro_liquido_4t * lpa_3t / lucro_liquido_3t
+                    # mesma guarda de LIMITE_LPA usada em extrai_lpa() -- aqui a explosao tem
+                    # uma causa adicional: lucro_liquido_3t proximo de zero (mesmo um lucro
+                    # minusculo, tipo R$ -12 mil) faz a "quantidade de acoes implicita"
+                    # (lucro_liquido_3t / lpa_3t) ficar minuscula, e dividir por ela de novo
+                    # explode o resultado pra ordem de milhoes (confirmado em SOND5 2012-09-30:
+                    # lucro_3t=-12.000, lpa_3t=-614 -> estimado ~5,2 milhoes, estourando
+                    # NUMERIC(10,4)) -- sem essa guarda o INSERT quebrava o scraper inteiro.
+                    derivado[coluna] = None if abs(estimado) >= LIMITE_LPA else estimado
                 else:
                     derivado[coluna] = None
                 continue

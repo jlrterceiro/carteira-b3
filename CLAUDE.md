@@ -455,6 +455,29 @@ bancos, todos alternando entre as duas ao longo dos ~16 anos de histórico:
   "Resultado Antes do Resultado Financeiro e dos Tributos" (única outra variação que existe
   no projeto inteiro).
 
+**Bug encontrado e corrigido (split controlador/não-controlador zerado, achado validando
+contra o yfinance)**: variante do bug do `acha()` acima, mas sem empate de profundidade — a
+CVM as vezes preenche `3.11.01`/`3.11.02` ("Atribuído aos Sócios da Empresa
+Controladora"/"Não Controladores") com **0 e 0**, mesmo com `3.11` (o total) tendo um valor
+real — confirmado em CAMB3, CGRA4, VSTE3, RECV3 e mais 137 ações (1001 linhas no total).
+Diferente do fallback já existente (`vl_lucro_liquido is None` → usa o total, pra empresa que
+nem tem a linha de split) — aqui a conta EXISTE e tem valor explícito 0, então o fallback
+antigo não disparava. Corrigido: quando `vl_lucro_liquido=0` E
+`vl_participacao_nao_controladores=0` E o total é diferente de zero, assume que não há
+participação minoritária real (formulário só não foi preenchido) e usa o total também.
+Sem esse fix, o bug se propagava pro 4T derivado: como `vl_lucro_liquido` de 1T/2T/3T vinha
+zerado, a subtração (`Anual − 1T − 2T − 3T`) ficava `Anual − 0 − 0 − 0`, dando o total do ano
+inteiro em vez do 4T isolado (confirmado em RECV3 2025: 4T mostrava R$638mi — o ANUAL — em
+vez dos R$50,7mi corretos). Balanço não tem essa classe de bug (`vl_patrimonio_liquido`/
+`vl_participacao_nao_controladores`: 0 ocorrências do mesmo padrão).
+
+**Bug encontrado e corrigido (overflow na estimativa de LPA do 4T)**: a estimativa de LPA do
+4T (`lucro_líquido_4T × lpa_3T ÷ lucro_líquido_3T`, ver acima) explode quando
+`lucro_líquido_3T` é próximo de zero — confirmado em SOND5 (2012-09-30: lucro 3T = −R$12 mil,
+lpa 3T = −614 → estimativa do 4T ≈ 5,2 milhões, estourando `NUMERIC(10,4)` e quebrando o
+`INSERT`). Corrigida aplicando a mesma guarda `LIMITE_LPA` (≥10.000 em módulo → `NULL`) já
+usada em `extrai_lpa()`, agora também no valor derivado.
+
 Duas decisões de modelagem:
 - `vl_receitas_financeiras`/`vl_despesas_financeiras` são confiáveis (reconciliam exatamente
   com `vl_resultado_financeiro`, testado em EVEN3: 35.160 − 11.036 = 24.124) — diferente do
