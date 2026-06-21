@@ -109,6 +109,18 @@ def por_codigo(contas, cd_conta):
     return conta['vl_conta'] if conta else None
 
 
+def nivel_superior(contas):
+    # restringe a contas de "grupo" (ex: '3.06'), excluindo sub-contas de detalhe (ex:
+    # '3.06.01') -- usado quando o texto de uma sub-conta pode coincidir por acaso com o de
+    # outra sub-conta em outro ramo da hierarquia (ver vl_impostos abaixo).
+    return [c for c in contas if c['cd_conta'].count('.') == 1]
+
+
+def soma(*valores):
+    presentes = [v for v in valores if v is not None]
+    return sum(presentes) if presentes else None
+
+
 def filhos_diretos(contas, cd_pai):
     nivel_pai = cd_pai.count('.')
     return [c for c in contas if c['cd_conta'].startswith(cd_pai + '.') and c['cd_conta'].count('.') == nivel_pai + 1]
@@ -150,8 +162,13 @@ def extrai_wide(contas, perfil):
         'vl_receitas_financeiras': acha(contas, 'receitas financeiras'),
         'vl_despesas_financeiras': acha(contas, 'despesas financeiras'),
         'vl_resultado_financeiro': acha(contas, 'resultado financeiro', excluir=('antes',)),
-        'vl_lucro_antes_impostos': acha(contas, 'resultado antes', 'tributos', excluir=('resultado financeiro',)),
-        'vl_impostos': acha(contas, 'imposto de renda'),
+        # frase generica de proposito -- a CVM usa "Resultado Antes dos Tributos sobre o
+        # Lucro" pra maioria das empresas, mas "Resultado Antes Tributacao/Participacoes"
+        # pros mesmos 25 bancos que dividem o imposto em IR corrente + diferido (ver
+        # vl_impostos abaixo) -- so as 3 variacoes de "resultado antes ..." no projeto
+        # inteiro sao essa, a de cima, e "Resultado Antes do Resultado Financeiro e dos
+        # Tributos" (excluida explicitamente, e uma conta intermediaria diferente).
+        'vl_lucro_antes_impostos': acha(contas, 'resultado antes', excluir=('resultado financeiro',)),
         # "Lucro/Prejuizo CONSOLIDADO do Periodo" pra quem consolida, "Lucro/Prejuizo do
         # Periodo" (sem "consolidado") pra quem so tem DRE individual (sem subsidiaria) --
         # frase sem "consolidado" casa com os dois.
@@ -159,6 +176,18 @@ def extrai_wide(contas, perfil):
         'vl_lucro_liquido': acha(contas, 'atribu', 'controladora'),
         'vl_participacao_nao_controladores': acha(contas, 'atribu', 'nao controladores'),
     }
+    # "Imposto de Renda e Contribuicao Social sobre o Lucro" e uma linha de grupo unica na
+    # maioria dos periodos -- MAS a CVM tambem usa, em outros periodos (achado em 25 bancos,
+    # incluindo BBAS3/BBDC4/ITUB4/BPAC3 -- nao e fixo por empresa, varia ano a ano pra mesma
+    # empresa, parece mudanca de formulario da CVM ao longo do tempo), uma versao dividida em
+    # DUAS linhas de grupo separadas ("Provisao para IR e Contribuicao Social" + "IR
+    # Diferido"), sem nenhuma linha combinada. Restrito a contas de grupo (nivel_superior) pra
+    # nao casar com a sub-conta-filha "Provisao para imposto de renda" que existe DENTRO de
+    # cada uma dessas (current e diferido), o que pegaria so um pedaco do efeito fiscal total.
+    grupo = nivel_superior(contas)
+    valores['vl_impostos'] = acha(grupo, 'imposto de renda', 'contribuicao social', 'sobre o lucro')
+    if valores['vl_impostos'] is None:
+        valores['vl_impostos'] = soma(acha(grupo, 'provisao para ir'), acha(grupo, 'ir diferido'))
     if valores['vl_lucro_liquido'] is None:
         # sem subsidiaria pra consolidar, nao existe linha "atribuido a controladores" --
         # todo o resultado e da propria empresa, sem split de participacao minoritaria

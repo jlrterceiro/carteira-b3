@@ -414,6 +414,25 @@ completo (não só reprocessar a curadoria) já que o valor já tinha sido trunc
 original. `tb_balanco_conta`/`tb_dfc_conta` não têm esse problema — nenhuma das duas
 demonstrações guarda valor por ação.
 
+**Bug encontrado e corrigido (`vl_impostos`/`vl_lucro_antes_impostos` em 25 bancos)**: a CVM
+tem DUAS formas de reportar o efeito fiscal na DRE, e qual delas aparece **varia por período
+pra a mesma empresa** (não é por empresa) — confirmado em BBAS3/BBDC4/ITUB4/BPAC3 e mais 21
+bancos, todos alternando entre as duas ao longo dos ~16 anos de histórico:
+- Combinada: uma única conta de grupo "Imposto de Renda e Contribuição Social sobre o Lucro".
+- Dividida: duas contas de grupo separadas, "Provisão para IR e Contribuição Social"
+  (corrente) + "IR Diferido" — sem nenhuma linha combinada. A busca antiga
+  (`acha(contas, 'imposto de renda')`) não casava com nenhuma das duas (o texto usa a sigla
+  "IR", não "imposto de renda" por extenso) e caía pra uma sub-conta-filha chamada "Provisão
+  para imposto de renda" que existe DUPLICADA dentro de cada uma das duas contas de grupo
+  (corrente e diferido) — pegava só um pedaço do efeito fiscal total, não o total. Corrigido
+  restringindo a busca a contas de grupo (`nivel_superior()`, exclui sub-contas de detalhe) e
+  somando as duas linhas quando a combinada não existir. Mesmo achado afetou
+  `vl_lucro_antes_impostos`: nesses períodos divididos a conta se chama "Resultado Antes
+  Tributação/Participações" (sem a palavra "tributos"), que a busca antiga não cobria —
+  generalizada pra casar qualquer "resultado antes..." que não seja a conta intermediária
+  "Resultado Antes do Resultado Financeiro e dos Tributos" (única outra variação que existe
+  no projeto inteiro).
+
 Duas decisões de modelagem:
 - `vl_receitas_financeiras`/`vl_despesas_financeiras` são confiáveis (reconciliam exatamente
   com `vl_resultado_financeiro`, testado em EVEN3: 35.160 − 11.036 = 24.124) — diferente do
