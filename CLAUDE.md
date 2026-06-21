@@ -304,6 +304,17 @@ em vez de nulificar; mantido aqui pela mesma razão, só que agora com uma base 
 de passivos financeiros da CVM em vez do número opaco do yfinance). `vl_divida_liquida`
 SEMPRE calculada como `vl_divida_total - vl_caixa`.
 
+**Limitação conhecida, aceita de propósito (validando contra o yfinance)**: `vl_divida_total`
+pro perfil padrão fica ~5-10% menor que o yfinance em várias empresas (confirmado em ITSA4:
+gap de R$940mi bate exato com "Passivos de Arrendamentos" em `2.01.05.02.05`+`2.02.02.02.04` —
+posições fora do ramo `2.01.04`/`2.02.01` que a curadoria já soma). Diferente do achado do
+`vl_caixa` acima (frase única, posição única, fácil de generalizar), o texto de arrendamento
+mercantil tem **112 variações diferentes** espalhadas por posições inconsistentes entre
+empresas (incluindo erros de digitação na própria base, ex: "arrendamento merncatil") — mesma
+categoria de instabilidade já aceita pro capex do DFC (ver seção própria). Decisão tomada:
+manter como está, sem tentar casar por texto — o risco de pegar conta errada numa empresa
+qualquer supera o ganho de fechar esse gap em algumas.
+
 `vl_valor_patrimonial_tangivel` calculado como `vl_patrimonio_liquido - "Intangível"` (texto)
 — a CVM não tem uma linha pronta de "tangible book value" como o yfinance tinha.
 
