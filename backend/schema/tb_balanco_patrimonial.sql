@@ -15,8 +15,10 @@
 -- diferente pro ativo/passivo, sem o conceito de circulante/nao circulante (cd_conta '1.01'
 -- e 'Caixa e Equivalentes de Caixa' pro banco, 'Ativo Circulante' pro padrao -- mesmo codigo,
 -- conceito totalmente diferente). Por isso popula_balanco.py casa cada coluna por TEXTO de
--- ds_conta (normalizado), nunca por cd_conta fixo, exceto vl_ativo_total ('1') e
--- vl_passivo_total ('2') que sao estaveis nos dois perfis.
+-- ds_conta (normalizado), nunca por cd_conta fixo, exceto vl_ativo_total ('1'), estavel nos
+-- dois perfis. vl_passivo_total NAO vem da conta '2' da CVM (essa conta inclui patrimonio
+-- liquido, sempre igual a vl_ativo_total) -- e derivado por subtracao
+-- (vl_ativo_total - vl_patrimonio_liquido_total), representando so o passivo exigivel.
 --
 -- vl_ativo_circulante/vl_passivo_circulante/vl_capital_giro ficam NULL pro perfil banco --
 -- esse conceito nao existe nesse plano de contas, nao e dado faltando.

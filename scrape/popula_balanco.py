@@ -186,7 +186,6 @@ def detecta_perfil(contas):
 def extrai_wide(contas, perfil):
     valores = {
         'vl_ativo_total': por_codigo(contas, '1'),
-        'vl_passivo_total': por_codigo(contas, '2'),
         'vl_imobilizado': acha(contas, 'imobilizado'),
     }
     # "Patrimonio Liquido Consolidado" inclui participacao de nao controladores -- mesmo
@@ -197,6 +196,21 @@ def extrai_wide(contas, perfil):
     contas_passivo = [c for c in contas if c['cd_conta'].startswith('2')]
     valores['vl_patrimonio_liquido_total'] = acha(contas_passivo, 'patrimonio liquido')
     valores['vl_participacao_nao_controladores'] = acha(contas_passivo, 'nao controlador')
+    # Bug encontrado e corrigido (achado montando um relatorio de NCAV/screening): a conta
+    # "2 - Passivo Total" da propria CVM INCLUI o patrimonio liquido (identidade contabil
+    # brasileira: 2 = 2.01 + 2.02 + 2.03, onde 2.03 e o proprio patrimonio liquido) -- por
+    # isso `por_codigo(contas, '2')` sempre dava exatamente igual a `vl_ativo_total` (testado
+    # em ITSA4/PETR4/B3SA3/CSAN3/ABEV3/USIM5/BBDC4 e mais, diferenca sempre zero), inutil pra
+    # qualquer formula que precise so do passivo EXIGIVEL (ex: NCAV de Graham). O pipeline
+    # antigo via yfinance ja mapeava esse campo pra "Total Liabilities Net Minority Interest"
+    # (passivo sem patrimonio liquido) -- a migracao pra CVM perdeu essa semantica usando a
+    # conta '2' literal por engano. Corrigido derivando por subtracao
+    # (`vl_ativo_total - vl_patrimonio_liquido_total`, identidade que vale nos 3 perfis,
+    # confirmado exato: ITSA4 114.503.000.000-94.958.000.000=19.545.000.000, bate com
+    # 2.01+2.02 somados direto, 5.339.000.000+14.206.000.000=19.545.000.000) em vez de
+    # casar/somar 2.01/2.02 por texto, que tem semantica diferente por perfil banco/seguradora
+    # (mesmo cd_conta, ds_conta diferente) e arriscaria reintroduzir esse tipo de bug.
+    valores['vl_passivo_total'] = subtrai(valores['vl_ativo_total'], valores['vl_patrimonio_liquido_total'])
     if valores['vl_participacao_nao_controladores'] is None:
         valores['vl_patrimonio_liquido'] = valores['vl_patrimonio_liquido_total']
     else:

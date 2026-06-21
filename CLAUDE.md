@@ -312,6 +312,24 @@ Controladores" como irmã das reservas em algumas, "Patrimônio Líquido Atribu�
 Controladores" como filho direto em outras) — `popula_balanco.py` casa só por "não
 controlador", que cobre as duas variações.
 
+**Bug encontrado e corrigido (`vl_passivo_total` incluindo patrimônio líquido, achado
+montando um relatório de screening/NCAV)**: a conta `'2' - Passivo Total` da própria CVM
+segue a identidade contábil brasileira `2 = 2.01 (circulante) + 2.02 (não circulante) + 2.03
+(patrimônio líquido)` — ou seja, JÁ inclui o patrimônio líquido, e por isso
+`por_codigo(contas, '2')` sempre dava exatamente igual a `vl_ativo_total` (confirmado em
+ITSA4/PETR4/B3SA3/CSAN3/ABEV3/USIM5/BBDC4 e mais, diferença sempre zero) — inútil pra qualquer
+fórmula que precise só do passivo exigível (ex: NCAV de Graham, `Ativo Circulante − Passivo
+Total`, que ficava sempre fortemente negativo pra toda a base). O pipeline antigo via
+yfinance já mapeava esse campo pra `Total Liabilities Net Minority Interest` (passivo SEM
+patrimônio líquido) — a migração pra CVM perdeu essa semântica usando a conta `'2'` literal
+por engano. Corrigido derivando por subtração (`vl_ativo_total − vl_patrimonio_liquido_total`)
+em vez de casar/somar `2.01`/`2.02` por texto (que tem semântica diferente por perfil
+banco/seguradora, mesmo `cd_conta`, `ds_conta` diferente — arriscaria reintroduzir esse tipo
+de bug). Confirmado exato nos 3 perfis (padrão, banco, seguradora): ITSA4
+(19.545.000.000 = 5.339.000.000+14.206.000.000, soma de `2.01`+`2.02` direto), PETR4, B3SA3,
+BBAS3, PSSA3 — identidade `vl_ativo_total = vl_passivo_total + vl_patrimonio_liquido_total`
+bate exata em todos.
+
 `vl_caixa`: caixa + aplicações financeiras de curto prazo (`1.01.01` + `1.01.02`) pro perfil
 padrão; só o caixa estreito (`1.01`) pro perfil banco — o "Ativos Financeiros" bancário
 (`1.02`) inclui carteira de crédito/empréstimos a clientes, não é caixa.
