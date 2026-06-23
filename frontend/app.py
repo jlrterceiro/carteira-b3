@@ -127,6 +127,83 @@ COLUNAS_GANHOS = {
 }
 
 
+def tabela_patrimonio_html(df):
+    linhas_html = []
+    for _, row in df.iterrows():
+        sinal = 'pos' if row['ganho_capital_pct'] > 0 else ('neg' if row['ganho_capital_pct'] < 0 else '')
+        linhas_html.append(f'''
+        <tr>
+            <td class="esquerda" data-sort="{row['sg_ticker']}">{row['sg_ticker']}</td>
+            <td data-sort="{row['quantidade']}">{fmt_num(row['quantidade'])}</td>
+            <td data-sort="{row['preco_medio']}">{fmt_brl(row['preco_medio'])}</td>
+            <td data-sort="{row['preco_atual']}">{fmt_brl(row['preco_atual'])}</td>
+            <td data-sort="{row['ganho_capital_pct']}">
+                <div class="variacao">
+                    <span class="{sinal}">{fmt_brl(row['ganho_capital'])}</span>
+                    <span class="{sinal}">{fmt_pct(row['ganho_capital_pct'])}</span>
+                </div>
+            </td>
+            <td data-sort="{row['vl_posicao']}">{fmt_brl(row['vl_posicao'])}</td>
+            <td data-sort="{row['peso_carteira_pct']}">{fmt_pct(row['peso_carteira_pct'])}</td>
+        </tr>''')
+
+    return f'''
+    <style>
+        body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
+        th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee;
+                  overflow: hidden; text-overflow: ellipsis; }}
+        th.esquerda, td.esquerda {{ text-align: left; }}
+        th {{ cursor: pointer; background: #f8f9fb; color: rgba(49,51,63,0.6); text-transform: uppercase;
+              user-select: none; position: sticky; top: 0; }}
+        th:hover {{ background: #eef0f4; }}
+        .variacao {{ display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }}
+        .pos {{ color: green; }}
+        .neg {{ color: red; }}
+    </style>
+    <table id="tbl-patrimonio">
+        <colgroup>
+            <col style="width: 11%">
+            <col style="width: 13%">
+            <col style="width: 13%">
+            <col style="width: 13%">
+            <col style="width: 20%">
+            <col style="width: 17%">
+            <col style="width: 13%">
+        </colgroup>
+        <thead><tr>
+            <th class="esquerda" data-col="0" data-type="text">TICKER</th>
+            <th data-col="1" data-type="num">QUANTIDADE</th>
+            <th data-col="2" data-type="num">PREÇO MÉDIO</th>
+            <th data-col="3" data-type="num">PREÇO ATUAL</th>
+            <th data-col="4" data-type="num">VARIAÇÃO</th>
+            <th data-col="5" data-type="num">VALOR EM CARTEIRA</th>
+            <th data-col="6" data-type="num">% DA CARTEIRA</th>
+        </tr></thead>
+        <tbody>{"".join(linhas_html)}</tbody>
+    </table>
+    <script>
+        const dir = {{}};
+        document.querySelectorAll('#tbl-patrimonio th').forEach(th => {{
+            th.addEventListener('click', () => {{
+                const col = parseInt(th.dataset.col);
+                const tipo = th.dataset.type;
+                dir[col] = !dir[col];
+                const tbody = document.querySelector('#tbl-patrimonio tbody');
+                const linhas = Array.from(tbody.querySelectorAll('tr'));
+                linhas.sort((a, b) => {{
+                    const av = a.children[col].dataset.sort;
+                    const bv = b.children[col].dataset.sort;
+                    const cmp = tipo === 'num' ? (parseFloat(av) - parseFloat(bv)) : av.localeCompare(bv);
+                    return dir[col] ? cmp : -cmp;
+                }});
+                linhas.forEach(linha => tbody.appendChild(linha));
+            }});
+        }});
+    </script>
+    '''
+
+
 def tela_posicao():
     resp = get_sessao().get(f'{API_BASE_URL}/carteira/posicao')
     if resp.status_code != 200:
@@ -140,25 +217,10 @@ def tela_posicao():
 
     df = pd.DataFrame(linhas).sort_values('vl_posicao', ascending=False)
     valor_total = df['vl_posicao'].sum()
-    cores_variacao = df['ganho_capital_pct'].apply(cor_variacao)
-    df['variacao'] = [
-        f'{fmt_brl(nominal)}     {fmt_pct(pct)}'
-        for nominal, pct in zip(df['ganho_capital'], df['ganho_capital_pct'])
-    ]
     df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
 
-    df_exibicao = df.rename(
-        columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% DA CARTEIRA', 'variacao': 'VARIAÇÃO'}
-    )[['TICKER', 'QUANTIDADE', 'PREÇO MÉDIO', 'PREÇO ATUAL', 'VARIAÇÃO', 'VALOR EM CARTEIRA', '% DA CARTEIRA']]
-    estilo = df_exibicao.style.format({
-        'QUANTIDADE': fmt_num,
-        'PREÇO MÉDIO': fmt_brl,
-        'PREÇO ATUAL': fmt_brl,
-        'VALOR EM CARTEIRA': fmt_brl,
-        '% DA CARTEIRA': fmt_pct,
-    })
-    estilo = estilo.apply(lambda col: cores_variacao.reindex(col.index), subset=['VARIAÇÃO'])
-    st.dataframe(estilo, use_container_width=True, hide_index=True)
+    altura = 46 + 40 * len(df)
+    st.components.v1.html(tabela_patrimonio_html(df), height=altura, scrolling=True)
     st.metric('Valor total em carteira', fmt_brl(valor_total))
 
 
