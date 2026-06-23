@@ -231,9 +231,22 @@ def tela_posicao():
     variacao_total = df['ganho_capital'].sum()
     variacao_total_pct = 100 * variacao_total / custo_total
 
+    cor_total = cor_variacao(variacao_total)
     col1, col2 = st.columns(2)
-    col1.metric('Patrimônio total', fmt_brl(valor_total))
-    col2.metric('Variação total', f'{fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}')
+    col1.markdown(f'''
+        <div style="text-align:right">
+            <div style="color:rgba(49,51,63,0.6); font-size:14px;">Patrimônio total</div>
+            <div style="font-size:1.75rem; font-weight:600;">{fmt_brl(valor_total)}</div>
+        </div>
+    ''', unsafe_allow_html=True)
+    col2.markdown(f'''
+        <div style="text-align:right">
+            <div style="color:rgba(49,51,63,0.6); font-size:14px;">Variação total</div>
+            <div style="font-size:1.75rem; font-weight:600; {cor_total}">
+                {fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}
+            </div>
+        </div>
+    ''', unsafe_allow_html=True)
 
     altura = 46 + 40 * len(df)
     st.components.v1.html(tabela_patrimonio_html(df), height=altura, scrolling=True)
