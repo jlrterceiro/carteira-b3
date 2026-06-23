@@ -142,7 +142,7 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
     return f'''
     <style>
         body {{ margin: 4px; font-family: "Source Sans Pro", sans-serif; }}
-        .borda {{ border: 1px solid #ddd; border-radius: 20px; overflow: hidden; }}
+        .borda {{ border: 1px solid #ddd; border-radius: 20px; overflow: hidden; padding: 16px; }}
         .scroll-wrap {{ overflow-x: auto; }}
         table {{ width: 100%; min-width: 700px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
         th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee; border-right: 1px solid #eee;
@@ -153,7 +153,7 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
               font-weight: bold; user-select: none; position: sticky; top: 0; }}
         th:hover {{ background: #eef0f4; }}
         tbody tr:nth-child(even) {{ background: #f9f7f2; }}
-        .totais td {{ border-bottom: 2px solid #ddd; background: #ffffff; }}
+        .totais td {{ border-bottom: 2px solid #ddd; border-right: none; background: #ffffff; }}
         .totais .rotulo {{ color: #000000; font-size: 11px; font-weight: bold; text-transform: uppercase; }}
         .totais .valor {{ font-weight: normal; white-space: nowrap; }}
         .seta {{ margin-left: 4px; }}
@@ -251,7 +251,7 @@ def tela_posicao():
 
     cor_total = cor_variacao(variacao_total)
 
-    altura = 94 + 40 * len(df)
+    altura = 126 + 40 * len(df)
     html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total)
     st.components.v1.html(html, height=altura, scrolling=True)
 
