@@ -152,8 +152,9 @@ def tabela_patrimonio_html(df):
         body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
         .scroll-wrap {{ overflow-x: auto; }}
         table {{ width: 100%; min-width: 700px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
-        th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee;
+        th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee; border-right: 1px solid #eee;
                   overflow: hidden; text-overflow: ellipsis; }}
+        th:last-child, td:last-child {{ border-right: none; }}
         th.esquerda, td.esquerda {{ text-align: left; }}
         th {{ cursor: pointer; background: #f8f9fb; color: rgba(49,51,63,0.6); text-transform: uppercase;
               user-select: none; position: sticky; top: 0; }}
