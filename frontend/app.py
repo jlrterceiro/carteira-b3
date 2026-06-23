@@ -232,18 +232,17 @@ def tela_posicao():
     variacao_total_pct = 100 * variacao_total / custo_total
 
     cor_total = cor_variacao(variacao_total)
-    col1, col2 = st.columns(2)
-    col1.markdown(f'''
-        <div style="text-align:right">
-            <div style="color:rgba(49,51,63,0.6); font-size:14px;">Patrimônio total</div>
-            <div style="font-size:1.75rem; font-weight:600;">{fmt_brl(valor_total)}</div>
-        </div>
-    ''', unsafe_allow_html=True)
-    col2.markdown(f'''
-        <div style="text-align:right">
-            <div style="color:rgba(49,51,63,0.6); font-size:14px;">Variação total</div>
-            <div style="font-size:1.75rem; font-weight:600; {cor_total}">
-                {fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}
+    st.markdown(f'''
+        <div style="display:flex; justify-content:flex-end; gap:24px; margin-bottom:8px;">
+            <div style="text-align:right">
+                <div style="color:rgba(49,51,63,0.6); font-size:13px;">Variação total</div>
+                <div style="font-size:13px; font-weight:600; {cor_total}">
+                    {fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div style="color:rgba(49,51,63,0.6); font-size:13px;">Patrimônio total</div>
+                <div style="font-size:13px; font-weight:600;">{fmt_brl(valor_total)}</div>
             </div>
         </div>
     ''', unsafe_allow_html=True)
