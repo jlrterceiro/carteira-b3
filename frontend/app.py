@@ -179,7 +179,10 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
                 <td></td>
                 <td>
                     <div class="rotulo">Variação total</div>
-                    <div class="valor" style="{cor_total}">{fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}</div>
+                    <div class="valor variacao" style="{cor_total}">
+                        <span>{fmt_brl(variacao_total)}</span>
+                        <span>{fmt_pct(variacao_total_pct)}</span>
+                    </div>
                 </td>
                 <td>
                     <div class="rotulo">Patrimônio total</div>
