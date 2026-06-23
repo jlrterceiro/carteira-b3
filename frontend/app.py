@@ -160,6 +160,7 @@ def tabela_patrimonio_html(df):
               font-weight: bold; user-select: none; position: sticky; top: 0; }}
         th:hover {{ background: #eef0f4; }}
         tbody tr:nth-child(even) {{ background: #f9f7f2; }}
+        .seta {{ margin-left: 4px; }}
         .variacao {{ display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }}
         .pos {{ color: green; }}
         .neg {{ color: red; }}
@@ -176,13 +177,13 @@ def tabela_patrimonio_html(df):
             <col style="width: 13%">
         </colgroup>
         <thead><tr>
-            <th class="esquerda" data-col="0" data-type="text">TICKER</th>
-            <th data-col="1" data-type="num">QUANTIDADE</th>
-            <th data-col="2" data-type="num">PREÇO MÉDIO</th>
-            <th data-col="3" data-type="num">PREÇO ATUAL</th>
-            <th data-col="4" data-type="num">VARIAÇÃO</th>
-            <th data-col="5" data-type="num">VALOR EM CARTEIRA</th>
-            <th data-col="6" data-type="num">% DA CARTEIRA</th>
+            <th class="esquerda" data-col="0" data-type="text">TICKER<span class="seta"></span></th>
+            <th data-col="1" data-type="num">QUANTIDADE<span class="seta"></span></th>
+            <th data-col="2" data-type="num">PREÇO MÉDIO<span class="seta"></span></th>
+            <th data-col="3" data-type="num">PREÇO ATUAL<span class="seta"></span></th>
+            <th data-col="4" data-type="num">VARIAÇÃO<span class="seta"></span></th>
+            <th data-col="5" data-type="num">VALOR EM CARTEIRA<span class="seta"></span></th>
+            <th data-col="6" data-type="num">% DA CARTEIRA<span class="seta"></span></th>
         </tr></thead>
         <tbody>{"".join(linhas_html)}</tbody>
     </table>
@@ -203,6 +204,8 @@ def tabela_patrimonio_html(df):
                     return dir[col] ? cmp : -cmp;
                 }});
                 linhas.forEach(linha => tbody.appendChild(linha));
+                document.querySelectorAll('#tbl-patrimonio th .seta').forEach(s => s.textContent = '');
+                th.querySelector('.seta').textContent = dir[col] ? '▲' : '▼';
             }});
         }});
     </script>
