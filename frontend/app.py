@@ -134,11 +134,11 @@ def tela_posicao():
 
     df = pd.DataFrame(linhas).sort_values('ganho_capital_pct', ascending=False)
     valor_total = df['vl_posicao'].sum()
-    df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
     df['variacao'] = [
         f'{fmt_brl(nominal)} ({fmt_pct(pct)})'
         for nominal, pct in zip(df['ganho_capital'], df['ganho_capital_pct'])
     ]
+    df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
 
     df_exibicao = df.drop(columns=['nm_ativo', 'data_cotacao', 'ganho_capital', 'ganho_capital_pct']).rename(
         columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% da Carteira', 'variacao': 'Variação'}
