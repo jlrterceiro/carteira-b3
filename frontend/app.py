@@ -108,8 +108,6 @@ COLUNAS_POSICAO = {
     'preco_medio': 'Preço Médio',
     'preco_atual': 'Preço Atual',
     'vl_posicao': 'Valor em Carteira',
-    'ganho_capital': 'Variação',
-    'ganho_capital_pct': 'Variação (%)',
 }
 
 COLUNAS_GANHOS = {
@@ -136,15 +134,21 @@ def tela_posicao():
 
     df = pd.DataFrame(linhas).sort_values('ganho_capital_pct', ascending=False)
     valor_total = df['vl_posicao'].sum()
+    df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
+    df['variacao'] = [
+        f'{fmt_brl(nominal)} ({fmt_pct(pct)})'
+        for nominal, pct in zip(df['ganho_capital'], df['ganho_capital_pct'])
+    ]
 
-    df_exibicao = df.drop(columns=['nm_ativo', 'data_cotacao']).rename(columns=COLUNAS_POSICAO)
+    df_exibicao = df.drop(columns=['nm_ativo', 'data_cotacao', 'ganho_capital', 'ganho_capital_pct']).rename(
+        columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% da Carteira', 'variacao': 'Variação'}
+    )
     estilo = df_exibicao.style.format({
         'Quantidade': fmt_num,
         'Preço Médio': fmt_brl,
         'Preço Atual': fmt_brl,
         'Valor em Carteira': fmt_brl,
-        'Variação': fmt_brl,
-        'Variação (%)': fmt_pct,
+        '% da Carteira': fmt_pct,
     })
     st.dataframe(estilo, use_container_width=True, hide_index=True)
     st.metric('Valor total em carteira', fmt_brl(valor_total))
