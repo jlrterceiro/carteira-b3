@@ -142,7 +142,7 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
     return f'''
     <style>
         body {{ margin: 4px; font-family: "Source Sans Pro", sans-serif; }}
-        .borda {{ border: 1px solid #ddd; border-radius: 10px; overflow: hidden; }}
+        .borda {{ border: 1px solid #ddd; border-radius: 20px; overflow: hidden; }}
         .scroll-wrap {{ overflow-x: auto; }}
         table {{ width: 100%; min-width: 700px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
         th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee; border-right: 1px solid #eee;
