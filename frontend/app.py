@@ -39,6 +39,12 @@ def fmt_pct(valor, decimais=2):
     return f'{fmt_num(valor, decimais)}%'
 
 
+def cor_variacao(valor):
+    if pd.isna(valor) or valor == 0:
+        return ''
+    return 'color: green' if valor > 0 else 'color: red'
+
+
 def get_sessao():
     if 'sessao' not in st.session_state:
         st.session_state.sessao = requests.Session()
@@ -103,21 +109,21 @@ def tela_login():
 
 
 COLUNAS_POSICAO = {
-    'sg_ticker': 'Ticker',
-    'quantidade': 'Quantidade',
-    'preco_medio': 'Preço Médio',
-    'preco_atual': 'Preço Atual',
-    'vl_posicao': 'Valor em Carteira',
+    'sg_ticker': 'TICKER',
+    'quantidade': 'QUANTIDADE',
+    'preco_medio': 'PREÇO MÉDIO',
+    'preco_atual': 'PREÇO ATUAL',
+    'vl_posicao': 'VALOR EM CARTEIRA',
 }
 
 COLUNAS_GANHOS = {
-    'sg_ticker': 'Ticker',
-    'ganho_realizado_vendas': 'Ganho Realizado (Vendas)',
-    'proventos': 'Proventos',
-    'ganho_nao_realizado': 'Ganho Não Realizado',
-    'ganho_total': 'Ganho Total',
-    'valor_investido': 'Valor Investido',
-    'ganho_pct_total': 'Ganho Total (%)',
+    'sg_ticker': 'TICKER',
+    'ganho_realizado_vendas': 'GANHO REALIZADO (VENDAS)',
+    'proventos': 'PROVENTOS',
+    'ganho_nao_realizado': 'GANHO NÃO REALIZADO',
+    'ganho_total': 'GANHO TOTAL',
+    'valor_investido': 'VALOR INVESTIDO',
+    'ganho_pct_total': 'GANHO TOTAL (%)',
 }
 
 
@@ -132,8 +138,9 @@ def tela_posicao():
         st.info('Você ainda não tem nenhuma posição. Importe suas operações pra começar.')
         return
 
-    df = pd.DataFrame(linhas).sort_values('ganho_capital_pct', ascending=False)
+    df = pd.DataFrame(linhas).sort_values('vl_posicao', ascending=False)
     valor_total = df['vl_posicao'].sum()
+    cores_variacao = df['ganho_capital_pct'].apply(cor_variacao)
     df['variacao'] = [
         f'{fmt_brl(nominal)} ({fmt_pct(pct)})'
         for nominal, pct in zip(df['ganho_capital'], df['ganho_capital_pct'])
@@ -141,15 +148,16 @@ def tela_posicao():
     df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
 
     df_exibicao = df.rename(
-        columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% da Carteira', 'variacao': 'Variação'}
-    )[['Ticker', 'Quantidade', 'Preço Médio', 'Preço Atual', 'Variação', 'Valor em Carteira', '% da Carteira']]
+        columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% DA CARTEIRA', 'variacao': 'VARIAÇÃO'}
+    )[['TICKER', 'QUANTIDADE', 'PREÇO MÉDIO', 'PREÇO ATUAL', 'VARIAÇÃO', 'VALOR EM CARTEIRA', '% DA CARTEIRA']]
     estilo = df_exibicao.style.format({
-        'Quantidade': fmt_num,
-        'Preço Médio': fmt_brl,
-        'Preço Atual': fmt_brl,
-        'Valor em Carteira': fmt_brl,
-        '% da Carteira': fmt_pct,
+        'QUANTIDADE': fmt_num,
+        'PREÇO MÉDIO': fmt_brl,
+        'PREÇO ATUAL': fmt_brl,
+        'VALOR EM CARTEIRA': fmt_brl,
+        '% DA CARTEIRA': fmt_pct,
     })
+    estilo = estilo.apply(lambda col: cores_variacao.reindex(col.index), subset=['VARIAÇÃO'])
     st.dataframe(estilo, use_container_width=True, hide_index=True)
     st.metric('Valor total em carteira', fmt_brl(valor_total))
 
@@ -170,14 +178,16 @@ def tela_ganhos():
     investido = df['valor_investido'].sum()
 
     df_exibicao = df.drop(columns='id_ativo').rename(columns=COLUNAS_GANHOS)
+    colunas_variacao = ['GANHO REALIZADO (VENDAS)', 'GANHO NÃO REALIZADO', 'GANHO TOTAL', 'GANHO TOTAL (%)']
     estilo = df_exibicao.style.format({
-        'Ganho Realizado (Vendas)': fmt_brl,
-        'Proventos': fmt_brl,
-        'Ganho Não Realizado': fmt_brl,
-        'Ganho Total': fmt_brl,
-        'Valor Investido': fmt_brl,
-        'Ganho Total (%)': fmt_pct,
+        'GANHO REALIZADO (VENDAS)': fmt_brl,
+        'PROVENTOS': fmt_brl,
+        'GANHO NÃO REALIZADO': fmt_brl,
+        'GANHO TOTAL': fmt_brl,
+        'VALOR INVESTIDO': fmt_brl,
+        'GANHO TOTAL (%)': fmt_pct,
     })
+    estilo = estilo.map(cor_variacao, subset=colunas_variacao)
     st.dataframe(estilo, use_container_width=True, hide_index=True)
 
     col1, col2, col3 = st.columns(3)
@@ -228,23 +238,19 @@ def tela_rentabilidade():
     with col_mensal:
         st.subheader('Por mês')
         df_mensal = pd.DataFrame(dados['mensal']).rename(
-            columns={'periodo': 'Mês', 'rentabilidade_pct': 'Rentabilidade (%)'}
+            columns={'periodo': 'MÊS', 'rentabilidade_pct': 'RENTABILIDADE (%)'}
         )
-        st.dataframe(
-            df_mensal.style.format({'Rentabilidade (%)': fmt_pct}),
-            use_container_width=True,
-            hide_index=True,
-        )
+        estilo_mensal = df_mensal.style.format({'RENTABILIDADE (%)': fmt_pct})
+        estilo_mensal = estilo_mensal.map(cor_variacao, subset=['RENTABILIDADE (%)'])
+        st.dataframe(estilo_mensal, use_container_width=True, hide_index=True)
     with col_anual:
         st.subheader('Por ano')
         df_anual = pd.DataFrame(dados['anual']).rename(
-            columns={'periodo': 'Ano', 'rentabilidade_pct': 'Rentabilidade (%)'}
+            columns={'periodo': 'ANO', 'rentabilidade_pct': 'RENTABILIDADE (%)'}
         )
-        st.dataframe(
-            df_anual.style.format({'Rentabilidade (%)': fmt_pct}),
-            use_container_width=True,
-            hide_index=True,
-        )
+        estilo_anual = df_anual.style.format({'RENTABILIDADE (%)': fmt_pct})
+        estilo_anual = estilo_anual.map(cor_variacao, subset=['RENTABILIDADE (%)'])
+        st.dataframe(estilo_anual, use_container_width=True, hide_index=True)
 
 
 TELAS = {
