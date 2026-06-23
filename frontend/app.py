@@ -159,7 +159,7 @@ def tabela_patrimonio_html(df):
         th {{ cursor: pointer; background: #f8f9fb; color: rgba(49,51,63,0.6); text-transform: uppercase;
               user-select: none; position: sticky; top: 0; }}
         th:hover {{ background: #eef0f4; }}
-        tbody tr:nth-child(even) {{ background: #f2efe9; }}
+        tbody tr:nth-child(even) {{ background: #f9f7f2; }}
         .variacao {{ display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }}
         .pos {{ color: green; }}
         .neg {{ color: red; }}
