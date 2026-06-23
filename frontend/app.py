@@ -140,9 +140,9 @@ def tela_posicao():
     ]
     df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
 
-    df_exibicao = df.drop(columns=['nm_ativo', 'data_cotacao', 'ganho_capital', 'ganho_capital_pct']).rename(
+    df_exibicao = df.rename(
         columns={**COLUNAS_POSICAO, 'peso_carteira_pct': '% da Carteira', 'variacao': 'Variação'}
-    )
+    )[['Ticker', 'Quantidade', 'Preço Médio', 'Preço Atual', 'Variação', 'Valor em Carteira', '% da Carteira']]
     estilo = df_exibicao.style.format({
         'Quantidade': fmt_num,
         'Preço Médio': fmt_brl,
