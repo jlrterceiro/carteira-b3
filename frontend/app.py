@@ -150,7 +150,8 @@ def tabela_patrimonio_html(df):
     return f'''
     <style>
         body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
+        .scroll-wrap {{ overflow-x: auto; }}
+        table {{ width: 100%; min-width: 700px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
         th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee;
                   overflow: hidden; text-overflow: ellipsis; }}
         th.esquerda, td.esquerda {{ text-align: left; }}
@@ -161,6 +162,7 @@ def tabela_patrimonio_html(df):
         .pos {{ color: green; }}
         .neg {{ color: red; }}
     </style>
+    <div class="scroll-wrap">
     <table id="tbl-patrimonio">
         <colgroup>
             <col style="width: 11%">
@@ -182,6 +184,7 @@ def tabela_patrimonio_html(df):
         </tr></thead>
         <tbody>{"".join(linhas_html)}</tbody>
     </table>
+    </div>
     <script>
         const dir = {{}};
         document.querySelectorAll('#tbl-patrimonio th').forEach(th => {{
