@@ -2,6 +2,12 @@
 -- que ja considera splits/agrupamentos/bonificacoes via tb_evento_corporativo.
 -- Substitui query_posicao_atual.sql -- agora com usuario como parametro em vez de
 -- fixo no codigo.
+--
+-- Usa a MAIOR dt_posicao ja calculada (nao CURRENT_DATE literal): fn_popula_posicao_diaria
+-- so gera linha pra hoje quando fn_rebuild_tudo() roda no mesmo dia -- se passar um dia sem
+-- rodar (scraper nao rodou, sem operacao nova), CURRENT_DATE literal nao bate com nenhuma
+-- linha e a posicao "desaparece" mesmo a carteira estando intacta. MAX(dt_posicao) sempre
+-- aponta pra ultima posicao calculada, seja ela de hoje ou de alguns dias atras.
 
 CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL)
 RETURNS TABLE (
@@ -25,7 +31,7 @@ AS $$
         FROM public.tb_posicao_diaria p
         JOIN public.tb_carteira c ON c.id_carteira = p.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
-        WHERE p.dt_posicao = CURRENT_DATE
+        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)
         GROUP BY p.id_ativo
         HAVING SUM(p.qt_ativo) > 0

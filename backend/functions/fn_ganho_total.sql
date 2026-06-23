@@ -3,8 +3,9 @@
 -- posicao atual (qtd hoje x preco medio hoje x cotacao mais recente).
 --
 -- p_dt_inicio/p_dt_fim filtram vendas e proventos por periodo; o ganho nao realizado
--- e sempre da posicao atual (CURRENT_DATE), ja que representa o que ainda esta na
--- carteira hoje -- nao faz sentido "nao realizado" num periodo passado.
+-- e sempre da posicao mais recente ja calculada (MAX(dt_posicao), nao CURRENT_DATE
+-- literal -- ver fn_posicao_atual.sql), ja que representa o que ainda esta na carteira
+-- hoje -- nao faz sentido "nao realizado" num periodo passado.
 --
 -- ganho_total_pct e o ganho_total sobre o total comprado historicamente (todas as
 -- compras, sem filtro de periodo -- e o capital que de fato foi colocado no ativo).
@@ -43,7 +44,7 @@ AS $$
         FROM public.tb_posicao_diaria p
         JOIN public.tb_carteira c ON c.id_carteira = p.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
-        WHERE p.dt_posicao = CURRENT_DATE
+        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
           AND (p_id_carteira IS NULL OR p.id_carteira = p_id_carteira)
           AND (p_id_corretora IS NULL OR p.id_corretora = p_id_corretora)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)

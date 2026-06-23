@@ -5,6 +5,8 @@
 -- dava quantidade e preco medio errados pra qualquer ativo que ja teve split (ex:
 -- BBAS3, GGBR3, ITUB3, CGRA4, BLAU3). Usuario agora e parametro em vez de fixo no
 -- codigo.
+--
+-- Usa a MAIOR dt_posicao ja calculada (nao CURRENT_DATE literal) -- ver fn_posicao_atual.sql.
 
 CREATE OR REPLACE FUNCTION public.fn_posicao_acoes(p_sg_usuario TEXT DEFAULT NULL)
 RETURNS TABLE (
@@ -27,7 +29,7 @@ AS $$
         FROM public.tb_posicao_diaria p
         JOIN public.tb_carteira c ON c.id_carteira = p.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
-        WHERE p.dt_posicao = CURRENT_DATE
+        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)
         GROUP BY p.id_ativo
         HAVING SUM(p.qt_ativo) > 0
