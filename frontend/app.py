@@ -104,14 +104,12 @@ def tela_login():
 
 COLUNAS_POSICAO = {
     'sg_ticker': 'Ticker',
-    'nm_ativo': 'Ativo',
     'quantidade': 'Quantidade',
     'preco_medio': 'Preço Médio',
     'preco_atual': 'Preço Atual',
-    'data_cotacao': 'Data da Cotação',
     'vl_posicao': 'Valor em Carteira',
-    'ganho_capital': 'Ganho de Capital',
-    'ganho_capital_pct': 'Ganho de Capital (%)',
+    'ganho_capital': 'Variação',
+    'ganho_capital_pct': 'Variação (%)',
 }
 
 COLUNAS_GANHOS = {
@@ -136,17 +134,17 @@ def tela_posicao():
         st.info('Você ainda não tem nenhuma posição. Importe suas operações pra começar.')
         return
 
-    df = pd.DataFrame(linhas)
+    df = pd.DataFrame(linhas).sort_values('ganho_capital_pct', ascending=False)
     valor_total = df['vl_posicao'].sum()
 
-    df_exibicao = df.rename(columns=COLUNAS_POSICAO)
+    df_exibicao = df.drop(columns=['nm_ativo', 'data_cotacao']).rename(columns=COLUNAS_POSICAO)
     estilo = df_exibicao.style.format({
         'Quantidade': fmt_num,
         'Preço Médio': fmt_brl,
         'Preço Atual': fmt_brl,
         'Valor em Carteira': fmt_brl,
-        'Ganho de Capital': fmt_brl,
-        'Ganho de Capital (%)': fmt_pct,
+        'Variação': fmt_brl,
+        'Variação (%)': fmt_pct,
     })
     st.dataframe(estilo, use_container_width=True, hide_index=True)
     st.metric('Valor total em carteira', fmt_brl(valor_total))
