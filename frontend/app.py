@@ -108,14 +108,6 @@ def tela_login():
                 st.error('Não foi possível cadastrar. Confira os campos.')
 
 
-COLUNAS_POSICAO = {
-    'sg_ticker': 'TICKER',
-    'quantidade': 'QUANTIDADE',
-    'preco_medio': 'PREÇO MÉDIO',
-    'preco_atual': 'PREÇO ATUAL',
-    'vl_posicao': 'VALOR EM CARTEIRA',
-}
-
 COLUNAS_GANHOS = {
     'sg_ticker': 'TICKER',
     'ganho_realizado_vendas': 'GANHO REALIZADO (VENDAS)',
@@ -127,7 +119,7 @@ COLUNAS_GANHOS = {
 }
 
 
-def tabela_patrimonio_html(df):
+def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total):
     linhas_html = []
     for _, row in df.iterrows():
         sinal = 'pos' if row['ganho_capital_pct'] > 0 else ('neg' if row['ganho_capital_pct'] < 0 else '')
@@ -160,6 +152,9 @@ def tabela_patrimonio_html(df):
               font-weight: bold; user-select: none; position: sticky; top: 0; }}
         th:hover {{ background: #eef0f4; }}
         tbody tr:nth-child(even) {{ background: #f9f7f2; }}
+        .totais td {{ border-bottom: 2px solid #ddd; background: #ffffff; }}
+        .totais .rotulo {{ color: rgba(49,51,63,0.6); font-size: 11px; font-weight: normal; text-transform: none; }}
+        .totais .valor {{ font-weight: 600; white-space: nowrap; }}
         .seta {{ margin-left: 4px; }}
         .variacao {{ display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }}
         .pos {{ color: green; }}
@@ -176,15 +171,32 @@ def tabela_patrimonio_html(df):
             <col style="width: 17%">
             <col style="width: 13%">
         </colgroup>
-        <thead><tr>
-            <th class="esquerda" data-col="0" data-type="text">TICKER<span class="seta"></span></th>
-            <th data-col="1" data-type="num">QUANTIDADE<span class="seta"></span></th>
-            <th data-col="2" data-type="num">PREÇO MÉDIO<span class="seta"></span></th>
-            <th data-col="3" data-type="num">PREÇO ATUAL<span class="seta"></span></th>
-            <th data-col="4" data-type="num">VARIAÇÃO<span class="seta"></span></th>
-            <th data-col="5" data-type="num">VALOR EM CARTEIRA<span class="seta"></span></th>
-            <th data-col="6" data-type="num">% DA CARTEIRA<span class="seta"></span></th>
-        </tr></thead>
+        <thead>
+            <tr class="totais">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>
+                    <div class="rotulo">Variação total</div>
+                    <div class="valor" style="{cor_total}">{fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}</div>
+                </td>
+                <td>
+                    <div class="rotulo">Patrimônio total</div>
+                    <div class="valor">{fmt_brl(valor_total)}</div>
+                </td>
+                <td></td>
+            </tr>
+            <tr>
+                <th class="esquerda" data-col="0" data-type="text">TICKER<span class="seta"></span></th>
+                <th data-col="1" data-type="num">QUANTIDADE<span class="seta"></span></th>
+                <th data-col="2" data-type="num">PREÇO MÉDIO<span class="seta"></span></th>
+                <th data-col="3" data-type="num">PREÇO ATUAL<span class="seta"></span></th>
+                <th data-col="4" data-type="num">VARIAÇÃO<span class="seta"></span></th>
+                <th data-col="5" data-type="num">PATRIMÔNIO ATUAL<span class="seta"></span></th>
+                <th data-col="6" data-type="num">% DA CARTEIRA<span class="seta"></span></th>
+            </tr>
+        </thead>
         <tbody>{"".join(linhas_html)}</tbody>
     </table>
     </div>
@@ -232,23 +244,10 @@ def tela_posicao():
     variacao_total_pct = 100 * variacao_total / custo_total
 
     cor_total = cor_variacao(variacao_total)
-    st.markdown(f'''
-        <div style="display:flex; justify-content:flex-end; gap:24px; margin-bottom:8px;">
-            <div style="text-align:right">
-                <div style="color:rgba(49,51,63,0.6); font-size:13px;">Variação total</div>
-                <div style="font-size:13px; font-weight:600; {cor_total}">
-                    {fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}
-                </div>
-            </div>
-            <div style="text-align:right">
-                <div style="color:rgba(49,51,63,0.6); font-size:13px;">Patrimônio total</div>
-                <div style="font-size:13px; font-weight:600;">{fmt_brl(valor_total)}</div>
-            </div>
-        </div>
-    ''', unsafe_allow_html=True)
 
-    altura = 46 + 40 * len(df)
-    st.components.v1.html(tabela_patrimonio_html(df), height=altura, scrolling=True)
+    altura = 86 + 40 * len(df)
+    html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total)
+    st.components.v1.html(html, height=altura, scrolling=True)
 
 
 def tela_ganhos():
