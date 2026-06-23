@@ -141,7 +141,8 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
 
     return f'''
     <style>
-        body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
+        body {{ margin: 4px; font-family: "Source Sans Pro", sans-serif; }}
+        .borda {{ border: 1px solid #ddd; border-radius: 10px; overflow: hidden; }}
         .scroll-wrap {{ overflow-x: auto; }}
         table {{ width: 100%; min-width: 700px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }}
         th, td {{ padding: 6px; text-align: right; border-bottom: 1px solid #eee; border-right: 1px solid #eee;
@@ -160,6 +161,7 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
         .pos {{ color: green; }}
         .neg {{ color: red; }}
     </style>
+    <div class="borda">
     <div class="scroll-wrap">
     <table id="tbl-patrimonio">
         <colgroup>
@@ -202,6 +204,7 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
         </thead>
         <tbody>{"".join(linhas_html)}</tbody>
     </table>
+    </div>
     </div>
     <script>
         const dir = {{}};
@@ -248,7 +251,7 @@ def tela_posicao():
 
     cor_total = cor_variacao(variacao_total)
 
-    altura = 86 + 40 * len(df)
+    altura = 94 + 40 * len(df)
     html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total)
     st.components.v1.html(html, height=altura, scrolling=True)
 
