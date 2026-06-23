@@ -20,6 +20,25 @@ PERIODOS = {
 st.set_page_config(page_title='Minha Carteira', layout='wide')
 
 
+def fmt_num(valor, decimais=2):
+    if pd.isna(valor):
+        return ''
+    texto = f'{valor:,.{decimais}f}'
+    return texto.translate(str.maketrans({',': '.', '.': ','}))
+
+
+def fmt_brl(valor, decimais=2):
+    if pd.isna(valor):
+        return ''
+    return f'R$ {fmt_num(valor, decimais)}'
+
+
+def fmt_pct(valor, decimais=2):
+    if pd.isna(valor):
+        return ''
+    return f'{fmt_num(valor, decimais)}%'
+
+
 def get_sessao():
     if 'sessao' not in st.session_state:
         st.session_state.sessao = requests.Session()
@@ -118,8 +137,16 @@ def tela_posicao():
         return
 
     df = pd.DataFrame(linhas)
-    st.dataframe(df.rename(columns=COLUNAS_POSICAO), use_container_width=True, hide_index=True)
-    st.metric('Valor total em carteira', f"R$ {df['vl_posicao'].sum():,.2f}")
+    valor_total = df['vl_posicao'].sum()
+
+    df_exibicao = df.copy()
+    df_exibicao['quantidade'] = df_exibicao['quantidade'].apply(fmt_num)
+    for col in ('preco_medio', 'preco_atual', 'vl_posicao', 'ganho_capital'):
+        df_exibicao[col] = df_exibicao[col].apply(fmt_brl)
+    df_exibicao['ganho_capital_pct'] = df_exibicao['ganho_capital_pct'].apply(fmt_pct)
+
+    st.dataframe(df_exibicao.rename(columns=COLUNAS_POSICAO), use_container_width=True, hide_index=True)
+    st.metric('Valor total em carteira', fmt_brl(valor_total))
 
 
 def tela_ganhos():
@@ -134,18 +161,24 @@ def tela_ganhos():
         return
 
     df = pd.DataFrame(linhas).sort_values('ganho_pct_total', ascending=False)
+    total = df['ganho_total'].sum()
+    investido = df['valor_investido'].sum()
+
+    df_exibicao = df.drop(columns='id_ativo').copy()
+    for col in ('ganho_realizado_vendas', 'proventos', 'ganho_nao_realizado', 'ganho_total', 'valor_investido'):
+        df_exibicao[col] = df_exibicao[col].apply(fmt_brl)
+    df_exibicao['ganho_pct_total'] = df_exibicao['ganho_pct_total'].apply(fmt_pct)
+
     st.dataframe(
-        df.drop(columns='id_ativo').rename(columns=COLUNAS_GANHOS),
+        df_exibicao.rename(columns=COLUNAS_GANHOS),
         use_container_width=True,
         hide_index=True,
     )
 
-    total = df['ganho_total'].sum()
-    investido = df['valor_investido'].sum()
     col1, col2, col3 = st.columns(3)
-    col1.metric('Ganho total', f'R$ {total:,.2f}')
-    col2.metric('Valor investido', f'R$ {investido:,.2f}')
-    col3.metric('Ganho % sobre investido', f'{100 * total / investido:.2f}%')
+    col1.metric('Ganho total', fmt_brl(total))
+    col2.metric('Valor investido', fmt_brl(investido))
+    col3.metric('Ganho % sobre investido', fmt_pct(100 * total / investido))
 
 
 def tela_rentabilidade():
@@ -184,20 +217,20 @@ def tela_rentabilidade():
     st.line_chart(df_diaria.set_index('dt_dia')['cumulativo_pct'])
 
     if dados['total_pct'] is not None:
-        st.metric('Rentabilidade do período (juros compostos)', f"{dados['total_pct']:.2f}%")
+        st.metric('Rentabilidade do período (juros compostos)', fmt_pct(dados['total_pct']))
 
     col_mensal, col_anual = st.columns(2)
     with col_mensal:
         st.subheader('Por mês')
-        df_mensal = pd.DataFrame(dados['mensal']).rename(
-            columns={'periodo': 'Mês', 'rentabilidade_pct': 'Rentabilidade (%)'}
-        )
+        df_mensal = pd.DataFrame(dados['mensal'])
+        df_mensal['rentabilidade_pct'] = df_mensal['rentabilidade_pct'].apply(fmt_pct)
+        df_mensal = df_mensal.rename(columns={'periodo': 'Mês', 'rentabilidade_pct': 'Rentabilidade (%)'})
         st.dataframe(df_mensal, use_container_width=True, hide_index=True)
     with col_anual:
         st.subheader('Por ano')
-        df_anual = pd.DataFrame(dados['anual']).rename(
-            columns={'periodo': 'Ano', 'rentabilidade_pct': 'Rentabilidade (%)'}
-        )
+        df_anual = pd.DataFrame(dados['anual'])
+        df_anual['rentabilidade_pct'] = df_anual['rentabilidade_pct'].apply(fmt_pct)
+        df_anual = df_anual.rename(columns={'periodo': 'Ano', 'rentabilidade_pct': 'Rentabilidade (%)'})
         st.dataframe(df_anual, use_container_width=True, hide_index=True)
 
 
