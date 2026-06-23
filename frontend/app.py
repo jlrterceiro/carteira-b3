@@ -139,13 +139,16 @@ def tela_posicao():
     df = pd.DataFrame(linhas)
     valor_total = df['vl_posicao'].sum()
 
-    df_exibicao = df.copy()
-    df_exibicao['quantidade'] = df_exibicao['quantidade'].apply(fmt_num)
-    for col in ('preco_medio', 'preco_atual', 'vl_posicao', 'ganho_capital'):
-        df_exibicao[col] = df_exibicao[col].apply(fmt_brl)
-    df_exibicao['ganho_capital_pct'] = df_exibicao['ganho_capital_pct'].apply(fmt_pct)
-
-    st.dataframe(df_exibicao.rename(columns=COLUNAS_POSICAO), use_container_width=True, hide_index=True)
+    df_exibicao = df.rename(columns=COLUNAS_POSICAO)
+    estilo = df_exibicao.style.format({
+        'Quantidade': fmt_num,
+        'Preço Médio': fmt_brl,
+        'Preço Atual': fmt_brl,
+        'Valor em Carteira': fmt_brl,
+        'Ganho de Capital': fmt_brl,
+        'Ganho de Capital (%)': fmt_pct,
+    })
+    st.dataframe(estilo, use_container_width=True, hide_index=True)
     st.metric('Valor total em carteira', fmt_brl(valor_total))
 
 
@@ -164,16 +167,16 @@ def tela_ganhos():
     total = df['ganho_total'].sum()
     investido = df['valor_investido'].sum()
 
-    df_exibicao = df.drop(columns='id_ativo').copy()
-    for col in ('ganho_realizado_vendas', 'proventos', 'ganho_nao_realizado', 'ganho_total', 'valor_investido'):
-        df_exibicao[col] = df_exibicao[col].apply(fmt_brl)
-    df_exibicao['ganho_pct_total'] = df_exibicao['ganho_pct_total'].apply(fmt_pct)
-
-    st.dataframe(
-        df_exibicao.rename(columns=COLUNAS_GANHOS),
-        use_container_width=True,
-        hide_index=True,
-    )
+    df_exibicao = df.drop(columns='id_ativo').rename(columns=COLUNAS_GANHOS)
+    estilo = df_exibicao.style.format({
+        'Ganho Realizado (Vendas)': fmt_brl,
+        'Proventos': fmt_brl,
+        'Ganho Não Realizado': fmt_brl,
+        'Ganho Total': fmt_brl,
+        'Valor Investido': fmt_brl,
+        'Ganho Total (%)': fmt_pct,
+    })
+    st.dataframe(estilo, use_container_width=True, hide_index=True)
 
     col1, col2, col3 = st.columns(3)
     col1.metric('Ganho total', fmt_brl(total))
@@ -222,16 +225,24 @@ def tela_rentabilidade():
     col_mensal, col_anual = st.columns(2)
     with col_mensal:
         st.subheader('Por mês')
-        df_mensal = pd.DataFrame(dados['mensal'])
-        df_mensal['rentabilidade_pct'] = df_mensal['rentabilidade_pct'].apply(fmt_pct)
-        df_mensal = df_mensal.rename(columns={'periodo': 'Mês', 'rentabilidade_pct': 'Rentabilidade (%)'})
-        st.dataframe(df_mensal, use_container_width=True, hide_index=True)
+        df_mensal = pd.DataFrame(dados['mensal']).rename(
+            columns={'periodo': 'Mês', 'rentabilidade_pct': 'Rentabilidade (%)'}
+        )
+        st.dataframe(
+            df_mensal.style.format({'Rentabilidade (%)': fmt_pct}),
+            use_container_width=True,
+            hide_index=True,
+        )
     with col_anual:
         st.subheader('Por ano')
-        df_anual = pd.DataFrame(dados['anual'])
-        df_anual['rentabilidade_pct'] = df_anual['rentabilidade_pct'].apply(fmt_pct)
-        df_anual = df_anual.rename(columns={'periodo': 'Ano', 'rentabilidade_pct': 'Rentabilidade (%)'})
-        st.dataframe(df_anual, use_container_width=True, hide_index=True)
+        df_anual = pd.DataFrame(dados['anual']).rename(
+            columns={'periodo': 'Ano', 'rentabilidade_pct': 'Rentabilidade (%)'}
+        )
+        st.dataframe(
+            df_anual.style.format({'Rentabilidade (%)': fmt_pct}),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 TELAS = {
