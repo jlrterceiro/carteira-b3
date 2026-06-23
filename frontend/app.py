@@ -83,10 +83,33 @@ def tela_login():
                 st.error('Não foi possível cadastrar. Confira os campos.')
 
 
+COLUNAS_POSICAO = {
+    'sg_ticker': 'Ticker',
+    'nm_ativo': 'Ativo',
+    'quantidade': 'Quantidade',
+    'preco_medio': 'Preço Médio',
+    'preco_atual': 'Preço Atual',
+    'data_cotacao': 'Data da Cotação',
+    'vl_posicao': 'Valor em Carteira',
+    'ganho_capital': 'Ganho de Capital',
+    'ganho_capital_pct': 'Ganho de Capital (%)',
+}
+
+COLUNAS_GANHOS = {
+    'sg_ticker': 'Ticker',
+    'ganho_realizado_vendas': 'Ganho Realizado (Vendas)',
+    'proventos': 'Proventos',
+    'ganho_nao_realizado': 'Ganho Não Realizado',
+    'ganho_total': 'Ganho Total',
+    'valor_investido': 'Valor Investido',
+    'ganho_pct_total': 'Ganho Total (%)',
+}
+
+
 def tela_posicao():
     resp = get_sessao().get(f'{API_BASE_URL}/carteira/posicao')
     if resp.status_code != 200:
-        st.error('Não foi possível carregar a posição.')
+        st.error('Não foi possível carregar o patrimônio.')
         return
 
     linhas = resp.json()
@@ -95,7 +118,7 @@ def tela_posicao():
         return
 
     df = pd.DataFrame(linhas)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df.rename(columns=COLUNAS_POSICAO), use_container_width=True, hide_index=True)
     st.metric('Valor total em carteira', f"R$ {df['vl_posicao'].sum():,.2f}")
 
 
@@ -111,7 +134,11 @@ def tela_ganhos():
         return
 
     df = pd.DataFrame(linhas).sort_values('ganho_pct_total', ascending=False)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df.drop(columns='id_ativo').rename(columns=COLUNAS_GANHOS),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     total = df['ganho_total'].sum()
     investido = df['valor_investido'].sum()
@@ -174,6 +201,13 @@ def tela_rentabilidade():
         st.dataframe(df_anual, use_container_width=True, hide_index=True)
 
 
+TELAS = {
+    'Patrimônio': tela_posicao,
+    'Ganhos': tela_ganhos,
+    'Rentabilidade': tela_rentabilidade,
+}
+
+
 def tela_principal():
     usuario = usuario_logado()
     with st.sidebar:
@@ -183,15 +217,11 @@ def tela_principal():
             get_sessao().post(f'{API_BASE_URL}/auth/logout')
             st.session_state.clear()
             st.rerun()
+        st.divider()
+        secao = st.radio('Menu', list(TELAS.keys()), label_visibility='collapsed')
 
     st.title('Minha Carteira')
-    aba_posicao, aba_ganhos, aba_rentabilidade = st.tabs(['Posição atual', 'Ganhos', 'Rentabilidade'])
-    with aba_posicao:
-        tela_posicao()
-    with aba_ganhos:
-        tela_ganhos()
-    with aba_rentabilidade:
-        tela_rentabilidade()
+    TELAS[secao]()
 
 
 if usuario_logado():
