@@ -156,7 +156,7 @@ def tabela_patrimonio_html(df):
                   overflow: hidden; text-overflow: ellipsis; }}
         th:last-child, td:last-child {{ border-right: none; }}
         th.esquerda, td.esquerda {{ text-align: left; }}
-        th {{ cursor: pointer; background: #f8f9fb; color: rgba(49,51,63,0.6); text-transform: uppercase;
+        th {{ cursor: pointer; background: #f8f9fb; color: #000000; text-transform: uppercase;
               font-weight: bold; user-select: none; position: sticky; top: 0; }}
         th:hover {{ background: #eef0f4; }}
         tbody tr:nth-child(even) {{ background: #f9f7f2; }}
