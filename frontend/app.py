@@ -134,7 +134,7 @@ def tabela_patrimonio_html(df):
         linhas_html.append(f'''
         <tr>
             <td class="esquerda" data-sort="{row['sg_ticker']}">{row['sg_ticker']}</td>
-            <td data-sort="{row['quantidade']}">{fmt_num(row['quantidade'])}</td>
+            <td data-sort="{row['quantidade']}">{fmt_num(row['quantidade'], 0)}</td>
             <td data-sort="{row['preco_medio']}">{fmt_brl(row['preco_medio'])}</td>
             <td data-sort="{row['preco_atual']}">{fmt_brl(row['preco_atual'])}</td>
             <td data-sort="{row['ganho_capital_pct']}">
@@ -227,9 +227,16 @@ def tela_posicao():
     valor_total = df['vl_posicao'].sum()
     df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
 
+    custo_total = (df['quantidade'] * df['preco_medio']).sum()
+    variacao_total = df['ganho_capital'].sum()
+    variacao_total_pct = 100 * variacao_total / custo_total
+
+    col1, col2 = st.columns(2)
+    col1.metric('Patrimônio total', fmt_brl(valor_total))
+    col2.metric('Variação total', f'{fmt_brl(variacao_total)}   {fmt_pct(variacao_total_pct)}')
+
     altura = 46 + 40 * len(df)
     st.components.v1.html(tabela_patrimonio_html(df), height=altura, scrolling=True)
-    st.metric('Valor total em carteira', fmt_brl(valor_total))
 
 
 def tela_ganhos():
