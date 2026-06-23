@@ -153,8 +153,8 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
         th:hover {{ background: #eef0f4; }}
         tbody tr:nth-child(even) {{ background: #f9f7f2; }}
         .totais td {{ border-bottom: 2px solid #ddd; background: #ffffff; }}
-        .totais .rotulo {{ color: rgba(49,51,63,0.6); font-size: 11px; font-weight: normal; text-transform: none; }}
-        .totais .valor {{ font-weight: 600; white-space: nowrap; }}
+        .totais .rotulo {{ color: rgba(49,51,63,0.6); font-size: 11px; font-weight: bold; text-transform: uppercase; }}
+        .totais .valor {{ font-weight: normal; white-space: nowrap; }}
         .seta {{ margin-left: 4px; }}
         .variacao {{ display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; }}
         .pos {{ color: green; }}
