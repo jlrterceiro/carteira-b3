@@ -142,7 +142,7 @@ def tela_posicao():
     valor_total = df['vl_posicao'].sum()
     cores_variacao = df['ganho_capital_pct'].apply(cor_variacao)
     df['variacao'] = [
-        f'{fmt_brl(nominal)} ({fmt_pct(pct)})'
+        f'{fmt_brl(nominal)}     {fmt_pct(pct)}'
         for nominal, pct in zip(df['ganho_capital'], df['ganho_capital_pct'])
     ]
     df['peso_carteira_pct'] = 100 * df['vl_posicao'] / valor_total
