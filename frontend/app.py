@@ -251,9 +251,9 @@ def tela_posicao():
 
     cor_total = cor_variacao(variacao_total)
 
-    altura = 126 + 40 * len(df)
+    altura = 136 + 40 * len(df)
     html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total)
-    st.components.v1.html(html, height=altura, scrolling=True)
+    st.components.v1.html(html, height=altura, scrolling=False)
 
 
 def tela_ganhos():
