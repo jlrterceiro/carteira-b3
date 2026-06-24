@@ -168,6 +168,38 @@ que o scraper roda de novo porque a fonte continua reportando os dois). Por isso
 removendo automaticamente a data mais recente de cada par (mesmo `id_ativo`+`vl_fator`, até 14
 dias de diferença). `test_validacoes.sql` confere que não sobra nenhum par desses.
 
+**`scraper_eventos_corporativos_b3.py` (complementar, não substitui o de yfinance)**: yfinance
+joga desdobramento e bonificação no mesmo balaio (`SPLIT`, só pelo sinal do fator) — a B3
+distingue os dois de verdade (`GetListedSupplementCompany`, ver seção de proventos pra detalhe
+da API). Mas o endpoint da B3 pra isso **não é o histórico completo** (confirmado contra a UI
+renderizada de verdade, não só a API — PETR4/VALE3/BBAS3 têm cada um 3-4 eventos no nosso banco,
+vindos do yfinance, que simplesmente não aparecem na resposta da B3), então esse scraper só
+SUBSTITUI/ADICIONA eventos nos pontos (ativo+data, tolerância de 14 dias, mesma janela do
+`remove_duplicados`) onde a B3 tem dado — nunca um `DELETE` geral como fizemos pra proventos.
+`tb_evento_corporativo.ds_origem` (`'B3'` ou `'yfinance'`, coluna nova) marca a procedência de
+cada linha.
+
+`factor` da B3 tem DUAS convenções diferentes pro mesmo campo, dependendo do `label`:
+- `GRUPAMENTO`: `factor` já É o multiplicador direto, mesma semântica de `vl_fator` (confirmado
+  exato: CEMIG 2007, `factor=0,002` bate com nosso `vl_fator=0.002`).
+- `DESDOBRAMENTO`/`BONIFICACAO`: `factor` vem em PERCENTUAL, precisa `1 + factor/100` pra virar
+  multiplicador (confirmado exato: PETR4 2008, `factor=100` → 2,0, bate com o split 2:1 conhecido;
+  CEMIG 2024, `factor=30` → 1,3, bate com o `SPLIT` que o yfinance já tinha gravado pra essa data
+  — só que com o tipo errado, era bonificação, não desdobramento).
+
+Match de classe (ON/PN) é pelas posições 10-11 do ISIN (`isinCode`/`assetIssued`, igual a lógica
+de proventos) — `classe_do_isin()`. UNIT não tem esse padrão de ISIN (usa "CDA" em vez de "ACN"
++ classe) — cai num fallback simples (atribui ao ativo classe UNIT do emissor, se existir).
+Eventos simultâneos do mesmo tipo na mesma data pro mesmo ativo (confirmado em BBAS3 1996: 3
+bonificações de 20%/30%/50% no mesmo dia) são agregados por PRODUTO dos multiplicadores antes
+de gravar, não um sobrescrevendo o outro — efeito cumulativo correto.
+
+Eventos anteriores ao início da nossa `tb_cotacao` (raspagem não cobre essa época) usam
+fallback de `+1 dia corrido` em vez de tentar achar o próximo pregão (que acharia um pregão
+real, mas anos depois da data certa, se não tiver cotação por perto) — impreciso, mas não
+absurdo, e sem efeito prático já que não há nada no sistema pra comparar contra essa época
+mesmo.
+
 yfinance também rate-limita/bloqueia depois de raspagens pesadas (centenas de tickers) — se
 um scraper começar a retornar tudo vazio/"possibly delisted" pra tickers que sabidamente
 existem, é isso, não bug: esperar alguns minutos e tentar de novo.
