@@ -791,17 +791,39 @@ que a soma de todas bate exata com o valor único que o yfinance reportava
 0,74813000). `tb_provento` agora agrupa por (`id_ativo`, `dt_ex`, `ds_tipo_provento`)
 — `uk_tb_provento_01` mudou de `(id_ativo, dt_ex)` pra incluir o tipo.
 
-**IRRF de 15% sobre JCP** (Lei 9.249/95, art. 9º, parágrafo único) — `vl_unitario` (bruto,
-como a empresa declara) tem duas colunas novas: `vl_unitario_liquido` e
-`vl_imposto_unitario`. Alíquota por tipo (`ALIQUOTA_IMPOSTO` em `scraper_proventos.py`):
-`JRS CAP PROPRIO`=15%, `DIVIDENDO`/`RENDIMENTO`/`REST CAP DIN`=0% (isentos pra pessoa física
-— decisão do usuário pro `RENDIMENTO`, que apareceu até em ações sem ser FII, provavelmente
-ligado a debênture participativa tipo a da Petrobras; tratado como isento por padrão, igual
-rendimento de FII, na ausência de um caso conhecido que exija alíquota diferente).
-`tb_provento_recebido`/`fn_ganho_total` (e a tela de Ganhos) agora somam o LÍQUIDO, não o
-bruto — decisão do usuário, reflete o caixa real recebido na conta. FII/BDR (ainda
+**IRRF sobre proventos** — `vl_unitario` (bruto, como a empresa declara) tem duas colunas:
+`vl_unitario_liquido` e `vl_imposto_unitario`. `RENDIMENTO`/`REST CAP DIN`=0% (isentos pra
+pessoa física — decisão do usuário pro `RENDIMENTO`, que apareceu até em ações sem ser FII,
+provavelmente ligado a debênture participativa tipo a da Petrobras; tratado como isento por
+padrão, igual rendimento de FII, na ausência de um caso conhecido que exija alíquota
+diferente). `tb_provento_recebido`/`fn_ganho_total` (e a tela de Ganhos) somam o LÍQUIDO, não
+o bruto — decisão do usuário, reflete o caixa real recebido na conta. FII/BDR (ainda
 yfinance) não têm líquido/imposto calculado — `fn_popula_provento_recebido` cai pro bruto
 nesse caso (`COALESCE(vl_unitario_liquido, vl_unitario_ajustado)`).
+
+`JRS CAP PROPRIO` (Lei 9.249/95, art. 9º, parágrafo único, alíquota alterada pela Lei
+15.270/2025): 15% até 31/12/2025, 17,5% a partir de 01/01/2026 — alíquota por DATA
+(`aliquota_imposto()` em `scraper_proventos.py`, usa `dt_ex` como referência, não a data de
+pagamento real que a B3 não fornece nesse endpoint — aproximação aceita, gap entre ex e
+pagamento raramente cruza a virada do ano de forma relevante), calculada já na raspagem
+(não depende de usuário/posição).
+
+`DIVIDENDO` a partir de 01/01/2026 (mesma Lei 15.270/2025): IRRF de 10%, mas só quando o
+total pago por uma MESMA empresa a um MESMO usuário (pessoa física, agregado entre todas as
+carteiras/corretoras dele — o limiar é por CPF) num MESMO mês passa de R$50.000 — nesse caso
+incide sobre o valor TOTAL do mês, não só o excedente. Tem regra de transição: dividendo
+aprovado até 31/12/2025 (mesmo que pago em 2026-2028) fica isento até 2028. Diferente do JCP,
+esse cálculo depende de QUANTAS AÇÕES o usuário tem — não dá pra pré-calcular por ativo/evento
+em `tb_provento` (genérico, sem usuário). Por isso fica isento nesse nível (mesma base pra
+todo mundo) e o cálculo real acontece em `fn_popula_provento_recebido`, que agrega por
+(usuário, emissor, mês) usando `tb_posicao_diaria` pra saber a quantidade de ações de cada um
+— `dt_aprovacao` (nova coluna em `tb_provento`, capturada do `dateApproval` da B3) decide a
+transição; `NULL` é tratado como "não comprovadamente isento" (mais conservador). Restrito a
+`dt_ex >= 2026-01-01` — dividendo histórico (sem `dt_aprovacao` preenchido) não entra na conta
+mesmo que `dt_aprovacao` esteja `NULL`. Testado contra a base real (2026-06-24): a carteira
+mais exposta a uma única empresa no mês fica em ~R$561 — longe do limiar, então o IRRF de
+dividendo fica em R$0,00 pra todo mundo hoje, como esperado pra investidor de varejo; o
+mecanismo está pronto pra quando/se isso mudar.
 
 **`vl_unitario_ajustado` muda de sentido**: pra `ds_origem='B3'`, a B3 já reporta o valor real
 da época sem nenhuma reescrita retroativa de split (diferente do yfinance, que ajustava pra

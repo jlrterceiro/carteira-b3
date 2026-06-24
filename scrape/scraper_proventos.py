@@ -15,15 +15,32 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
 }
 
-# IRRF de 15% retido na fonte sobre JCP (Lei 9.249/95, art. 9, paragrafo unico) -- dividendo,
-# rendimento e restituicao de capital sao isentos de IR pra pessoa fisica. Valor da B3 e
-# sempre o bruto declarado pela empresa.
-ALIQUOTA_IMPOSTO = {
-    'JRS CAP PROPRIO': 0.15,
-    'DIVIDENDO': 0.0,
-    'RENDIMENTO': 0.0,
-    'REST CAP DIN': 0.0,
+# IRRF sobre JCP (Lei 9.249/95, art. 9, paragrafo unico): 15% ate 31/12/2025, 17,5% a partir
+# de 01/01/2026 (Lei 15.270/2025) -- aliquota por data, nao mais uma constante. Rendimento e
+# restituicao de capital sao isentos de IR pra pessoa fisica, sem mudanca.
+#
+# DIVIDENDO fica de fora desse dict de proposito: a partir de 2026 (mesma Lei 15.270/2025) tem
+# IRRF de 10% mas SO quando o total pago por uma mesma empresa a uma mesma pessoa fisica num
+# mesmo mes passa de R$50.000 -- e nesse caso incide sobre o valor TOTAL do mes, nao so o
+# excedente. Isso depende de QUANTAS ACOES O USUARIO TEM (nao da B3, nem do ativo isolado), e
+# tem regra de transicao (dividendo aprovado at 31/12/2025 fica isento at 2028) -- por isso
+# nao pode ser calculado aqui, por ativo/evento; fica isento nesse nivel de propósito (mesma
+# base usada por todo mundo) e o calculo real (com limiar, por usuario+empresa+mes) acontece
+# em fn_popula_provento_recebido, que tem acesso a posicao/usuario. Ver CLAUDE.md.
+ALIQUOTA_IMPOSTO_DATADA = {
+    'JRS CAP PROPRIO': [('2026-01-01', 0.175), ('0001-01-01', 0.15)],
 }
+
+
+def aliquota_imposto(tipo, dt_ex):
+    faixas = ALIQUOTA_IMPOSTO_DATADA.get(tipo)
+    if not faixas:
+        return 0.0
+    dt_ex_str = dt_ex if isinstance(dt_ex, str) else dt_ex.isoformat()
+    for dt_corte, aliquota in faixas:
+        if dt_ex_str >= dt_corte:
+            return aliquota
+    return 0.0
 
 # sg_classe (tb_ativo, ON/PN/UNIT) -> typeStock retornado pela B3.
 TYPESTOCK_POR_CLASSE = {'ON': 'ON', 'PN': 'PN', 'UNIT': 'UNT'}
@@ -127,6 +144,7 @@ def proxima_data_pregao(conn, id_ativo, dt_referencia):
 
 def agrupa_por_tipo_e_data(conn, id_ativo, eventos, type_stock):
     agregados = {}
+    aprovacoes = {}
     for ev in eventos:
         if ev['typeStock'] != type_stock:
             continue
@@ -135,35 +153,44 @@ def agrupa_por_tipo_e_data(conn, id_ativo, eventos, type_stock):
         valor = parse_valor_br(ev['valueCash'])
         chave = (dt_prior_ex, tipo)
         agregados[chave] = agregados.get(chave, 0.0) + valor
+        # quando mais de um evento agrega na mesma chave, guarda a aprovacao MAIS RECENTE --
+        # mais conservador pra regra de transicao do dividendo (ver aliquota_imposto/CLAUDE.md):
+        # se qualquer parte do grupo foi aprovada depois do corte, o grupo todo nao se
+        # qualifica como "aprovado at 31/12/2025".
+        dt_aprov = parse_data_br(ev['dateApproval']) if ev.get('dateApproval') else None
+        if dt_aprov and (chave not in aprovacoes or dt_aprov > aprovacoes[chave]):
+            aprovacoes[chave] = dt_aprov
 
     eventos_finais = []
     for (dt_prior_ex, tipo), valor_bruto in agregados.items():
         dt_ex = proxima_data_pregao(conn, id_ativo, dt_prior_ex)
-        aliquota = ALIQUOTA_IMPOSTO.get(tipo, 0.0)
+        aliquota = aliquota_imposto(tipo, dt_ex)
         vl_imposto = round(valor_bruto * aliquota, 8)
         vl_liquido = round(valor_bruto - vl_imposto, 8)
-        eventos_finais.append((dt_ex, tipo, valor_bruto, vl_liquido, vl_imposto))
+        dt_aprovacao = aprovacoes.get((dt_prior_ex, tipo))
+        eventos_finais.append((dt_ex, tipo, valor_bruto, vl_liquido, vl_imposto, dt_aprovacao))
     return eventos_finais
 
 
 def replace_proventos(conn, id_ativo, eventos):
     with conn.cursor() as cur:
         cur.execute('DELETE FROM public.tb_provento WHERE id_ativo = %s', (id_ativo,))
-        for dt_ex, tipo, bruto, liquido, imposto in eventos:
+        for dt_ex, tipo, bruto, liquido, imposto, dt_aprovacao in eventos:
             cur.execute(
                 '''
                 INSERT INTO public.tb_provento (
                     id_ativo, dt_ex, vl_unitario, ds_tipo_provento,
-                    vl_unitario_liquido, vl_imposto_unitario, ds_origem
-                ) VALUES (%s,%s,%s,%s,%s,%s,'B3')
+                    vl_unitario_liquido, vl_imposto_unitario, dt_aprovacao, ds_origem
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,'B3')
                 ON CONFLICT (id_ativo, dt_ex, ds_tipo_provento) DO UPDATE SET
                     vl_unitario = EXCLUDED.vl_unitario,
                     vl_unitario_liquido = EXCLUDED.vl_unitario_liquido,
                     vl_imposto_unitario = EXCLUDED.vl_imposto_unitario,
+                    dt_aprovacao = EXCLUDED.dt_aprovacao,
                     ds_origem = EXCLUDED.ds_origem,
                     dh_atualizacao = now()
                 ''',
-                (id_ativo, dt_ex, bruto, tipo, liquido, imposto),
+                (id_ativo, dt_ex, bruto, tipo, liquido, imposto, dt_aprovacao),
             )
     conn.commit()
     return len(eventos)
