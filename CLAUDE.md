@@ -38,8 +38,10 @@ diretamente, só lê das tabelas.
 - `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
 - `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao` (histórico de preços diário)
 - `tb_evento_corporativo` (SPLIT/GRUP, com `vl_fator`) por `id_ativo`
-- `tb_provento` (valor bruto por ação por `id_ativo`+`dt_ex`, raw do yfinance) +
-  `vl_unitario_ajustado` (corrigido por `fn_popula_provento_ajustado`, ver seção de splits abaixo)
+- `tb_provento` (valor bruto por ação, por `id_ativo`+`dt_ex`+`ds_tipo_provento` — raw da B3
+  pra ações, yfinance ainda pra FII/BDR, ver seção própria) + `vl_unitario_liquido`/
+  `vl_imposto_unitario` (IRRF de 15% pra JCP) + `vl_unitario_ajustado` (corrigido por
+  `fn_popula_provento_ajustado`, ver seção de splits abaixo e seção de proventos)
 - `tb_posicao_diaria` — snapshot diário (carteira, corretora, ativo), recalculado do zero por `fn_popula_posicao_diaria`
 - `tb_provento_recebido` — proventos cruzados com a posição na data-com, uma linha só por evento real (não preenche dia a dia)
 - `tb_rentabilidade_ativo_diaria` — ganho/base em R$ por (carteira, corretora, ativo, dia de pregão)
@@ -151,7 +153,13 @@ uma cotação/provento do yfinance pra mesma data, se houve split depois.
 `fn_fator_acumulado(id_ativo, dt_referencia)` calcula o produto dos fatores de
 `tb_evento_corporativo` ocorridos DEPOIS da data — usado em dois lugares, em direções opostas:
 - **Rentabilidade diária**: preço de compra/venda (raw) é DIVIDIDO pelo fator antes de comparar com `tb_cotacao` (já ajustada).
-- **Provento**: valor por ação do yfinance (já ajustado pra baixo) é MULTIPLICADO pelo fator pra recuperar o valor real pago na época, gravado em `tb_provento.vl_unitario_ajustado`.
+- **Provento (`ds_origem='yfinance'`, hoje só FII/BDR)**: valor por ação do yfinance (já
+  ajustado pra baixo) é MULTIPLICADO pelo fator pra recuperar o valor real pago na época,
+  gravado em `tb_provento.vl_unitario_ajustado`. **Provento (`ds_origem='B3'`, ações)**: a B3
+  já reporta o valor real da época direto, sem reescrita retroativa — `vl_unitario_ajustado`
+  não precisa de fator nenhum (= `vl_unitario`); quem precisar comparar contra a cotação de
+  HOJE precisa DIVIDIR pelo fator (mesma direção da rentabilidade diária) — ver seção de
+  proventos pra detalhe completo.
 
 yfinance também tem **eventos de split duplicados** às vezes (mesmo fator, poucos dias de
 diferença — bug deles, confirmado contra fontes oficiais várias vezes, e que volta toda vez
@@ -708,9 +716,85 @@ curadoria, serve de auditoria e de fonte pra qualquer métrica que a curadoria d
 cobrir. `cd_conta` só serve pra navegar a hierarquia (achar contas-filhas), não é chave de
 identificação estável entre empresas.
 
+## Proventos (dividendos/JCP)
+
+Fonte trocada de yfinance pra B3 (`sistemaswebb3-listados.b3.com.br`, a mesma API JSON que o
+site institucional da B3 usa internamente pra mostrar "Dividendos e outros eventos
+corporativos") — motivada pelo bloqueio do yfinance/Yahoo Finance (anti-bot por IP, ver seção
+de fontes externas) e por uma vantagem concreta: a B3 discrimina o TIPO de cada provento
+(`DIVIDENDO`, `JRS CAP PROPRIO`, `RENDIMENTO`, `REST CAP DIN`), enquanto o yfinance devolvia
+tudo somado num valor bruto só, sem distinguir.
+
+`scraper_proventos.py <TICKER opcional>` itera por emissor (igual DRE/balanço/DFC — proventos
+são por empresa, replicados pra todos os `id_ativo` daquele `id_emissor`), resolve o
+`tradingName` da B3 a partir de qualquer ticker do emissor (`GetInitialCompanies`), busca
+todos os eventos de `GetListedCashDividends` UMA vez por emissor, e distribui pra cada
+`id_ativo` filtrando por `typeStock` (`ON`/`PN`/`UNT`, casado contra `tb_ativo.sg_classe`) —
+confirmado que o valor por ação É o mesmo entre classes pra um mesmo evento (Lei das S.A.
+exige isso), `typeStock` só existe pra permitir que cada classe tenha sua própria
+`closingPricePriorExDate` (preço de fechamento anterior ao ex, que varia por classe).
+`DELETE`+reinsere por `id_ativo` a cada execução (substitui tudo, igual `scraper_cotacoes.py`)
+— sem tabela `_old_yfinance` preservada (diferente da migração de DRE/balanço/DFC): mesmo
+papel semântico, só fonte melhor, sem mudança de formato que justifique manter as duas.
+
+**Só ações (`tb_tipo_ativo.sg_tipo_ativo='ACAO'`)** — FIIs/BDRs continuam em
+`ds_origem='yfinance'` (dado antigo, não re-raspado), fora do escopo dessa migração.
+
+**`dt_ex` não vem direto da API** — a B3 só devolve `lastDatePriorEx` ("última data anterior
+ao ex", a data de fechamento usada como referência, não a própria data ex). `dt_ex` real é
+inferido como o próximo dia de pregão depois de `lastDatePriorEx`, consultando
+`tb_cotacao` (`MIN(dt_cotacao) WHERE dt_cotacao > lastDatePriorEx`) em vez de simplesmente
+`+1 dia corrido` — pega o próximo dia de pregão de verdade mesmo quando `lastDatePriorEx` cai
+numa sexta (ex-data cairia na segunda, não no sábado). Confirmado contra o dado antigo do
+yfinance pra BBAS3/PETR4 (mesmas datas exatas).
+
+**Paginação tem limite silencioso**: `pageSize` acima de ~120 faz a API devolver
+`totalRecords`/`totalPages` nulos e `results` vazio, SEM erro — `fetch_cash_dividends` pagina
+em blocos de 120 de propósito, nunca pede tudo de uma vez.
+
+**Mais de uma linha por (ativo, data)**: a B3 lista cada evento separadamente (ex: 2
+declarações de DIVIDENDO + 2 de RENDIMENTO no mesmo `dt_ex`, valores diferentes) — confirmado
+que a soma de todas bate exata com o valor único que o yfinance reportava
+(PETR4 17/04/2025: 0,35477261×2 + 0,01706013 + 0,02152467 = 0,74813002, yfinance tinha
+0,74813000). `tb_provento` agora agrupa por (`id_ativo`, `dt_ex`, `ds_tipo_provento`)
+— `uk_tb_provento_01` mudou de `(id_ativo, dt_ex)` pra incluir o tipo.
+
+**IRRF de 15% sobre JCP** (Lei 9.249/95, art. 9º, parágrafo único) — `vl_unitario` (bruto,
+como a empresa declara) tem duas colunas novas: `vl_unitario_liquido` e
+`vl_imposto_unitario`. Alíquota por tipo (`ALIQUOTA_IMPOSTO` em `scraper_proventos.py`):
+`JRS CAP PROPRIO`=15%, `DIVIDENDO`/`RENDIMENTO`/`REST CAP DIN`=0% (isentos pra pessoa física
+— decisão do usuário pro `RENDIMENTO`, que apareceu até em ações sem ser FII, provavelmente
+ligado a debênture participativa tipo a da Petrobras; tratado como isento por padrão, igual
+rendimento de FII, na ausência de um caso conhecido que exija alíquota diferente).
+`tb_provento_recebido`/`fn_ganho_total` (e a tela de Ganhos) agora somam o LÍQUIDO, não o
+bruto — decisão do usuário, reflete o caixa real recebido na conta. FII/BDR (ainda
+yfinance) não têm líquido/imposto calculado — `fn_popula_provento_recebido` cai pro bruto
+nesse caso (`COALESCE(vl_unitario_liquido, vl_unitario_ajustado)`).
+
+**`vl_unitario_ajustado` muda de sentido**: pra `ds_origem='B3'`, a B3 já reporta o valor real
+da época sem nenhuma reescrita retroativa de split (diferente do yfinance, que ajustava pra
+baixo refletindo splits futuros) — `fn_popula_provento_ajustado()` não multiplica mais pelo
+fator pra esse caso (`vl_unitario_ajustado = vl_unitario` direto). Isso inverteu a direção do
+ajuste em `gerar_relatorio_screening.py` (dividendo médio/preço atual): antes dividia
+`vl_unitario` direto (já vinha na base "ações de hoje"), agora precisa DIVIDIR por
+`fn_fator_acumulado` pra trazer o valor real histórico pra essa mesma base — sem isso,
+subestimaria o yield de qualquer ação que fez desdobramento no período.
+
 ## Fontes de dados externas
 
 - dadosdemercado.com.br — scraping HTML (sem API), lista de tickers e detalhe de emissor
-- yfinance — cotações, splits/grupamentos, proventos, balanço patrimonial, valor de mercado (DRE saiu de yfinance, ver seção própria)
-- dados.cvm.gov.br — dados abertos da CVM, DRE (ITR trimestral), ver seção própria
+- B3 (`sistemaswebb3-listados.b3.com.br`) — API JSON não documentada publicamente, usada pelo
+  próprio site institucional da B3; proventos (dividendos/JCP/rendimento), ver seção própria.
+  Não tem o bloqueio anti-bot agressivo do Yahoo Finance.
+- yfinance — cotações, splits/grupamentos, balanço patrimonial, valor de mercado (DRE saiu de
+  yfinance, ver seção própria; proventos também saiu, ver seção própria). Sujeito a bloqueio
+  por IP da Yahoo depois de raspagens pesadas — quando bloqueado, manifesta como timeout puro
+  de conexão (sem resposta HTTP, nem 429/403) na maioria das tentativas, não como erro de
+  rate-limit normal de aplicação; esperar ou trocar de rede resolve.
+- dados.cvm.gov.br — dados abertos da CVM, DRE/balanço/DFC (ITR trimestral + DFP anual), ver
+  seções próprias. Também tem um dataset de desdobramento/grupamento/bonificação no
+  Formulário de Referência (`fre_cia_aberta_capital_social_desdobramento_<ano>.csv`,
+  dentro do zip `fre_cia_aberta_<ano>.zip`) mas é esparso e inconsistente entre anos
+  (apareceu no zip de 2023, ausente em 2024/2025/2026, só 2 linhas no ano em que apareceu) —
+  não é fonte sistemática viável pra histórico de splits, só serviria pra um caso pontual.
 - planilhas `negociacao-*.xlsx` — exportadas manualmente da B3 e importadas via `import_operacoes.py`, arquivadas em `scrape/importados/` depois de importadas
