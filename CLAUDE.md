@@ -123,10 +123,22 @@ conta criada direto no banco) e, depois de logado, abas de Posição atual, Ganh
 Rentabilidade. **Ações** — informação pública sobre ativos individuais, sem precisar logar
 (é uma parte aberta do site, dados de mercado não são por usuário); pensada pra crescer aos
 poucos. Primeiro incremento: gráfico de cotação de uma ação escolhida (`st.selectbox`, lista
-de `GET /acoes/lista`), com select pra alternar entre `vl_fechamento` ("ajustada apenas por
-eventos corporativos") e `vl_fechamento_ajustado` ("ajustada por dividendos e eventos
-corporativos") e o mesmo seletor de período (`PERIODOS`) já usado na aba Rentabilidade —
-`GET /acoes/cotacao?ticker=&inicio=&fim=`, lê direto de `tb_cotacao`.
+de `GET /acoes/lista`), com select de 3 opções de ajuste e o mesmo seletor de período
+(`PERIODOS`) já usado na aba Rentabilidade — `GET /acoes/cotacao?ticker=&inicio=&fim=`, lê
+direto de `tb_cotacao`:
+- "Sem ajuste (nominal na época)" (`vl_fechamento_nominal`) — preço real como negociou
+  naquele dia, calculado a partir de `vl_fechamento` MULTIPLICADO por
+  `fn_fator_acumulado(id_ativo, dt_cotacao)` na própria query da API (desfaz o ajuste
+  retroativo de split/grupamento que o yfinance já embute em `vl_fechamento`, mesma direção
+  já usada pra desfazer ajuste de provento yfinance — ver "Splits/grupamentos retroativos").
+  `tb_cotacao` não guarda essa coluna pronta, é sempre derivada na hora.
+- "Ajustada apenas por eventos corporativos" (`vl_fechamento`)
+- "Ajustada por eventos corporativos e dividendos" (`vl_fechamento_ajustado`)
+
+**Link direto pra uma ação**: `?ticker=PETR4` na URL (`st.query_params`) seleciona a ação e
+já abre na área Ações, mesmo sem estar logado — usado como o equivalente real de uma "página
+por ação" dentro do Streamlit, que **não tem rota de caminho dinâmico** tipo `/acoes/petr4`
+(precisaria de proxy/servidor próprio na frente; fora de escopo por agora).
 
 A aba Rentabilidade usa `GET /carteira/rentabilidade?inicio=&fim=` (ambos opcionais — sem
 `inicio` é "desde o início"), que devolve a série diária do `tb_rentabilidade_diaria` do

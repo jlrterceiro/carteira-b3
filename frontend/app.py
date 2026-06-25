@@ -442,8 +442,9 @@ TELAS = {
 }
 
 TIPOS_COTACAO = {
+    'Sem ajuste (nominal na época)': 'vl_fechamento_nominal',
     'Ajustada apenas por eventos corporativos': 'vl_fechamento',
-    'Ajustada por dividendos e eventos corporativos': 'vl_fechamento_ajustado',
+    'Ajustada por eventos corporativos e dividendos': 'vl_fechamento_ajustado',
 }
 
 
@@ -459,7 +460,16 @@ def tela_acoes():
         st.error('Não foi possível carregar a lista de ações.')
         return
 
-    ticker = st.selectbox('Ação', tickers)
+    # le o ticker da URL (?ticker=PETR4) pra permitir link direto pra uma acao -- Streamlit
+    # nao tem rota de caminho dinamico tipo /acoes/petr4 (precisaria de proxy/servidor
+    # proprio na frente), query param e o equivalente real dentro do framework.
+    ticker_url = st.query_params.get('ticker', '').upper()
+    index_inicial = tickers.index(ticker_url) if ticker_url in tickers else 0
+
+    ticker = st.selectbox('Ação', tickers, index=index_inicial)
+    if st.query_params.get('ticker') != ticker:
+        st.query_params['ticker'] = ticker
+
     tipo_cotacao = st.selectbox('Cotação', list(TIPOS_COTACAO.keys()))
     campo = TIPOS_COTACAO[tipo_cotacao]
 
@@ -510,7 +520,12 @@ def tela_principal():
 
 
 with st.sidebar:
-    area = st.radio('Área', ['Carteira', 'Ações'], horizontal=True, label_visibility='collapsed')
+    _area_default = 'Ações' if st.query_params.get('ticker') else 'Carteira'
+    area = st.radio(
+        'Área', ['Carteira', 'Ações'], horizontal=True,
+        index=['Carteira', 'Ações'].index(_area_default),
+        label_visibility='collapsed',
+    )
     st.divider()
 
 if area == 'Ações':

@@ -28,7 +28,11 @@ def cotacao(ticker: str, inicio: date | None = None, fim: date | None = None, co
     with conn.cursor() as cur:
         cur.execute(
             '''
-            SELECT c.dt_cotacao, c.vl_fechamento, c.vl_fechamento_ajustado
+            SELECT
+                c.dt_cotacao,
+                c.vl_fechamento * public.fn_fator_acumulado(c.id_ativo, c.dt_cotacao) AS vl_fechamento_nominal,
+                c.vl_fechamento,
+                c.vl_fechamento_ajustado
             FROM public.tb_cotacao c
             JOIN public.tb_ativo a ON a.id_ativo = c.id_ativo
             WHERE a.sg_ticker = %s
@@ -41,8 +45,9 @@ def cotacao(ticker: str, inicio: date | None = None, fim: date | None = None, co
         return [
             {
                 'dt_cotacao': row[0].isoformat(),
-                'vl_fechamento': float(row[1]),
-                'vl_fechamento_ajustado': float(row[2]) if row[2] is not None else None,
+                'vl_fechamento_nominal': float(row[1]),
+                'vl_fechamento': float(row[2]),
+                'vl_fechamento_ajustado': float(row[3]) if row[3] is not None else None,
             }
             for row in cur.fetchall()
         ]
