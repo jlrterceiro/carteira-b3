@@ -140,6 +140,22 @@ já abre na área Ações, mesmo sem estar logado — usado como o equivalente r
 por ação" dentro do Streamlit, que **não tem rota de caminho dinâmico** tipo `/acoes/petr4`
 (precisaria de proxy/servidor próprio na frente; fora de escopo por agora).
 
+**Seleção de intervalo no gráfico** (`alt.selection_interval`, sem `.interactive()` — não
+afeta zoom/escala, que continua desligado): arrastar o mouse sobre o gráfico marca um
+intervalo e mostra, numa caixa centralizada acima do gráfico (altura sempre reservada, "—"
+quando não há seleção, pra não pular o layout), a variação simples e a anualizada (juros
+compostos sobre os dias do intervalo, nunca regra de três) entre o primeiro e o último ponto
+selecionados — atualiza em tempo real durante o próprio arrasto (Streamlit dispara reruns
+contínuos enquanto o brush do Vega-Lite muda, não só no `mouseup`). A seleção é lida de
+`st.session_state[chart_key]` **antes** de montar o gráfico (o valor já reflete a interação
+que disparou aquele rerun) — `chart_key` inclui ação+cotação+período de propósito, pra trocar
+qualquer um desses controles começar com uma seleção limpa em vez de carregar um intervalo de
+datas que não existe mais no novo eixo x. Limpar a seleção é por **duplo clique** no gráfico
+(padrão do Vega-Lite) — `clear='click'` parecia a escolha óbvia, mas **quebra o próprio
+arrasto**: todo `mouseup` que termina um drag também dispara um `click` nativo do DOM (sem
+limiar de movimento, mousedown+mouseup no mesmo elemento já conta como click), e o Vega não
+distingue os dois — a seleção era criada e imediatamente limpa pelo mesmo gesto.
+
 A aba Rentabilidade usa `GET /carteira/rentabilidade?inicio=&fim=` (ambos opcionais — sem
 `inicio` é "desde o início"), que devolve a série diária do `tb_rentabilidade_diaria` do
 usuário (rollup `id_carteira IS NULL AND id_corretora IS NULL`) mais o agregado por mês/ano/
