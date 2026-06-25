@@ -441,6 +441,57 @@ TELAS = {
     'Rentabilidade': tela_rentabilidade,
 }
 
+TIPOS_COTACAO = {
+    'Ajustada apenas por eventos corporativos': 'vl_fechamento',
+    'Ajustada por dividendos e eventos corporativos': 'vl_fechamento_ajustado',
+}
+
+
+def tela_acoes():
+    st.title('Ações')
+
+    if 'acoes_lista_tickers' not in st.session_state:
+        resp = requests.get(f'{API_BASE_URL}/acoes/lista')
+        st.session_state.acoes_lista_tickers = resp.json() if resp.status_code == 200 else []
+
+    tickers = st.session_state.acoes_lista_tickers
+    if not tickers:
+        st.error('Não foi possível carregar a lista de ações.')
+        return
+
+    ticker = st.selectbox('Ação', tickers)
+    tipo_cotacao = st.selectbox('Cotação', list(TIPOS_COTACAO.keys()))
+    campo = TIPOS_COTACAO[tipo_cotacao]
+
+    escolha = st.radio('Período', list(PERIODOS.keys()), horizontal=True, index=2, key='acoes_periodo')
+    hoje = date.today()
+    if escolha == 'Total':
+        inicio, fim = None, hoje
+    elif escolha == 'Personalizado':
+        col1, col2 = st.columns(2)
+        inicio = col1.date_input('De', value=hoje - timedelta(days=365), key='acoes_de')
+        fim = col2.date_input('Até', value=hoje, key='acoes_ate')
+    else:
+        inicio, fim = hoje - PERIODOS[escolha], hoje
+
+    params = {'ticker': ticker, 'fim': fim.isoformat()}
+    if inicio:
+        params['inicio'] = inicio.isoformat()
+
+    resp = requests.get(f'{API_BASE_URL}/acoes/cotacao', params=params)
+    if resp.status_code != 200:
+        st.error('Não foi possível carregar a cotação.')
+        return
+
+    dados = resp.json()
+    if not dados:
+        st.info('Sem cotações nesse período.')
+        return
+
+    df = pd.DataFrame(dados)
+    df['dt_cotacao'] = pd.to_datetime(df['dt_cotacao'])
+    st.line_chart(df.set_index('dt_cotacao')[campo])
+
 
 def tela_principal():
     usuario = usuario_logado()
@@ -458,7 +509,13 @@ def tela_principal():
     TELAS[secao]()
 
 
-if usuario_logado():
+with st.sidebar:
+    area = st.radio('Área', ['Carteira', 'Ações'], horizontal=True, label_visibility='collapsed')
+    st.divider()
+
+if area == 'Ações':
+    tela_acoes()
+elif usuario_logado():
     tela_principal()
 else:
     tela_login()

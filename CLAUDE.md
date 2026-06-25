@@ -97,7 +97,10 @@ FastAPI fininho sobre as funções SQL existentes — autenticação por JWT em 
   criar outra — é assim que os 3 usuários que já existiam sem senha entram no sistema),
   `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
 - `carteira.py` — `GET /carteira/posicao` (`fn_posicao_atual`), `GET /carteira/ganhos`
-  (`fn_ganho_total`), ambos protegidos.
+  (`fn_ganho_total`), `GET /carteira/rentabilidade?inicio=&fim=`, todos protegidos.
+- `acoes.py` — `GET /acoes/lista` (tickers de ações), `GET /acoes/cotacao?ticker=&inicio=&fim=`
+  (lê `tb_cotacao` direto). **Sem `get_current_user`, de propósito** — dado de mercado, não é
+  por usuário, fica aberto pra a aba Ações do frontend (ver seção própria).
 
 `tb_usuario.ds_senha_hash` é nullable de propósito — usuário cadastrado antes da API (direto
 no banco) não tem senha até passar pelo fluxo de reivindicação em `/auth/cadastro`.
@@ -113,9 +116,17 @@ direto. Roda com `streamlit run frontend/app.py` (precisa da API rodando em para
 HTTP (com o cookie do JWT) em `st.session_state`, que persiste entre os reruns do Streamlit
 pra a mesma sessão de navegador — login fica "lembrado" enquanto a aba estiver aberta.
 
-Telas: login/cadastro (cadastro reaproveita o fluxo de "reivindicar" conta do `/auth/cadastro`
-— tem um aviso na tela sobre isso pra quem já tem conta criada direto no banco) e, depois de
-logado, abas de Posição atual, Ganhos e Rentabilidade.
+Duas áreas, selecionadas por um radio no topo da sidebar (`area`, fora do gate de login):
+**Carteira** (login obrigatório) — login/cadastro (cadastro reaproveita o fluxo de
+"reivindicar" conta do `/auth/cadastro` — tem um aviso na tela sobre isso pra quem já tem
+conta criada direto no banco) e, depois de logado, abas de Posição atual, Ganhos e
+Rentabilidade. **Ações** — informação pública sobre ativos individuais, sem precisar logar
+(é uma parte aberta do site, dados de mercado não são por usuário); pensada pra crescer aos
+poucos. Primeiro incremento: gráfico de cotação de uma ação escolhida (`st.selectbox`, lista
+de `GET /acoes/lista`), com select pra alternar entre `vl_fechamento` ("ajustada apenas por
+eventos corporativos") e `vl_fechamento_ajustado` ("ajustada por dividendos e eventos
+corporativos") e o mesmo seletor de período (`PERIODOS`) já usado na aba Rentabilidade —
+`GET /acoes/cotacao?ticker=&inicio=&fim=`, lê direto de `tb_cotacao`.
 
 A aba Rentabilidade usa `GET /carteira/rentabilidade?inicio=&fim=` (ambos opcionais — sem
 `inicio` é "desde o início"), que devolve a série diária do `tb_rentabilidade_diaria` do
