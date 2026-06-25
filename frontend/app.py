@@ -506,21 +506,10 @@ def tela_acoes():
     df = pd.DataFrame(dados)
     df['dt_cotacao'] = pd.to_datetime(df['dt_cotacao'])
 
-    # altair sem .interactive() de proposito -- st.line_chart (vega-lite) deixa zoom/pan
-    # ligado por padrao e nao tem opcao pra desligar; aqui o grafico so muda pelos
-    # controles (acao/cotacao/periodo), nunca por zoom/pan do mouse. O unico mouse-gesto
-    # permitido e arrastar pra selecionar um intervalo (brush) e ver a rentabilidade entre
-    # os dois pontos -- isso nao reescala o grafico, so marca a regiao e devolve o intervalo
-    # pro Python via on_select/selection_mode.
-    brush = alt.selection_interval(encodings=['x'], name='selecao')
-    grafico = alt.Chart(df).mark_line().encode(
-        x=alt.X('dt_cotacao:T', title=None),
-        y=alt.Y(f'{campo}:Q', title=None),
-    ).add_params(brush)
-
     # le a selecao da renderizacao ANTERIOR (guardada por key em session_state pelo
-    # on_select='rerun') antes de montar o grafico, pra já incluir a anotacao na mesma
-    # renderizacao -- sem isso, a anotacao só apareceria um rerun depois de soltar o mouse.
+    # on_select='rerun') antes de montar o grafico -- o widget ja chega com o valor da
+    # interacao que disparou ESSE rerun (Streamlit atualiza session_state antes do script
+    # rodar de novo), entao a metrica acima reflete a selecao atual, nao a anterior.
     chart_key = f'grafico_cotacao_{ticker}_{campo}'
     estado_anterior = st.session_state.get(chart_key)
     limites = ((estado_anterior or {}).get('selection') or {}).get('selecao', {}).get('dt_cotacao')
@@ -537,6 +526,12 @@ def tela_acoes():
         if len(sub) < 2:
             sub = None
 
+    # caixa centralizada acima do grafico, com altura reservada (sempre um st.metric, com
+    # "--" quando nao ha selecao) pra nao pular o layout do grafico quando a selecao some.
+    col_esq, col_centro, col_dir = st.columns([1, 2, 1])
+    with col_centro:
+        metrica = st.empty()
+
     if sub is not None:
         valor_inicial = sub.iloc[0][campo]
         valor_final = sub.iloc[-1][campo]
@@ -546,33 +541,28 @@ def tela_acoes():
         pct_anual = ((1 + pct / 100) ** (365 / dias) - 1) * 100 if dias > 0 else None
         dt_ini = sub.iloc[0]['dt_cotacao'].strftime('%d/%m/%Y')
         dt_fim = sub.iloc[-1]['dt_cotacao'].strftime('%d/%m/%Y')
-
-        texto = f'{pct:+.2f}%'
-        if pct_anual is not None:
-            texto += f'  (anualizada: {pct_anual:+.2f}%)'
-
-        # anotacao tipo "mini janela" perto de onde o arrasto terminou, na horizontal (x =
-        # fim da selecao). Na vertical NAO usa o valor da linha nesse ponto -- se a selecao
-        # termina perto do topo do grafico, a caixa fica cortada pelo clip da area de
-        # plotagem (bug visto na primeira versao); ancora no maximo da serie em vez disso,
-        # sempre dentro da area visivel.
-        y_anotacao = df[campo].max()
-        texto_df = pd.DataFrame([{'dt_cotacao': sub.iloc[-1]['dt_cotacao'], campo: y_anotacao, 'texto': texto}])
-        fundo = alt.Chart(texto_df).mark_rect(
-            width=215, height=28, cornerRadius=4, color='#262730', opacity=0.92,
-            align='left', baseline='top', dx=10, dy=4,
-        ).encode(x='dt_cotacao:T', y=f'{campo}:Q')
-        anotacao = alt.Chart(texto_df).mark_text(
-            align='left', baseline='middle', dx=18, dy=18, fontSize=12.5, fontWeight='bold', color='white',
-        ).encode(x='dt_cotacao:T', y=f'{campo}:Q', text='texto:N')
-        grafico = grafico + fundo + anotacao
-
-    evento = st.altair_chart(grafico, use_container_width=True, on_select='rerun', key=chart_key)
-
-    if sub is not None:
-        st.metric(f'Variação de {dt_ini} até {dt_fim}', f'{pct:+.2f}%', f'{pct_anual:+.2f}% anualizada' if pct_anual is not None else None)
+        metrica.metric(
+            f'Variação de {dt_ini} até {dt_fim}', f'{pct:+.2f}%',
+            f'{pct_anual:+.2f}% anualizada' if pct_anual is not None else None,
+        )
     else:
-        st.caption('Arraste sobre o gráfico pra selecionar um intervalo e ver a variação entre as duas datas.')
+        metrica.metric('Arraste sobre o gráfico pra selecionar um intervalo', '—')
+
+    st.write('')  # espaco em branco entre a caixa de rentabilidade e o grafico
+
+    # altair sem .interactive() de proposito -- st.line_chart (vega-lite) deixa zoom/pan
+    # ligado por padrao e nao tem opcao pra desligar; aqui o grafico so muda pelos
+    # controles (acao/cotacao/periodo), nunca por zoom/pan do mouse. O unico mouse-gesto
+    # permitido e arrastar pra selecionar um intervalo (brush) e ver a rentabilidade entre
+    # os dois pontos -- isso nao reescala o grafico, so marca a regiao e devolve o intervalo
+    # pro Python via on_select/selection_mode.
+    brush = alt.selection_interval(encodings=['x'], name='selecao')
+    grafico = alt.Chart(df).mark_line().encode(
+        x=alt.X('dt_cotacao:T', title=None),
+        y=alt.Y(f'{campo}:Q', title=None),
+    ).add_params(brush)
+
+    st.altair_chart(grafico, use_container_width=True, on_select='rerun', key=chart_key)
 
 
 def tela_principal():
