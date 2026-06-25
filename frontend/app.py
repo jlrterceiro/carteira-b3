@@ -471,7 +471,11 @@ def tela_acoes():
     if st.query_params.get('ticker') != ticker:
         st.query_params['ticker'] = ticker
 
-    tipo_cotacao = st.selectbox('Cotação', list(TIPOS_COTACAO.keys()))
+    opcoes_cotacao = list(TIPOS_COTACAO.keys())
+    tipo_cotacao = st.selectbox(
+        'Cotação', opcoes_cotacao,
+        index=opcoes_cotacao.index('Ajustada por eventos corporativos e dividendos'),
+    )
     campo = TIPOS_COTACAO[tipo_cotacao]
 
     escolha = st.radio('Período', list(PERIODOS.keys()), horizontal=True, index=2, key='acoes_periodo')
@@ -504,12 +508,41 @@ def tela_acoes():
 
     # altair sem .interactive() de proposito -- st.line_chart (vega-lite) deixa zoom/pan
     # ligado por padrao e nao tem opcao pra desligar; aqui o grafico so muda pelos
-    # controles (acao/cotacao/periodo), nunca por interacao direta do mouse.
+    # controles (acao/cotacao/periodo), nunca por zoom/pan do mouse. O unico mouse-gesto
+    # permitido e arrastar pra selecionar um intervalo (brush) e ver a rentabilidade entre
+    # os dois pontos -- isso nao reescala o grafico, so marca a regiao e devolve o intervalo
+    # pro Python via on_select/selection_mode.
+    brush = alt.selection_interval(encodings=['x'], name='selecao')
     grafico = alt.Chart(df).mark_line().encode(
         x=alt.X('dt_cotacao:T', title=None),
         y=alt.Y(f'{campo}:Q', title=None),
+    ).add_params(brush)
+
+    evento = st.altair_chart(
+        grafico, use_container_width=True,
+        on_select='rerun', key=f'grafico_cotacao_{ticker}_{campo}',
     )
-    st.altair_chart(grafico, use_container_width=True)
+
+    intervalo = (evento.get('selection') or {}).get('selecao') if evento else None
+    limites = (intervalo or {}).get('dt_cotacao')
+    if limites:
+        # o vega devolve o intervalo em milissegundos desde epoch -- sem unit='ms',
+        # pd.to_datetime interpreta como nanosegundos e o filtro abaixo fica vazio
+        # silenciosamente (sem erro nenhum).
+        ts_inicio, ts_fim = sorted(limites)
+        sub = df[
+            (df['dt_cotacao'] >= pd.to_datetime(ts_inicio, unit='ms')) &
+            (df['dt_cotacao'] <= pd.to_datetime(ts_fim, unit='ms'))
+        ]
+        if len(sub) >= 2:
+            valor_inicial = sub.iloc[0][campo]
+            valor_final = sub.iloc[-1][campo]
+            pct = (valor_final / valor_inicial - 1) * 100
+            dt_ini = sub.iloc[0]['dt_cotacao'].strftime('%d/%m/%Y')
+            dt_fim = sub.iloc[-1]['dt_cotacao'].strftime('%d/%m/%Y')
+            st.metric(f'Variação de {dt_ini} até {dt_fim}', f'{pct:.2f}%')
+    else:
+        st.caption('Arraste sobre o gráfico pra selecionar um intervalo e ver a variação entre as duas datas.')
 
 
 def tela_principal():
