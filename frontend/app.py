@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+import altair as alt
 import pandas as pd
 import requests
 import streamlit as st
@@ -500,7 +501,15 @@ def tela_acoes():
 
     df = pd.DataFrame(dados)
     df['dt_cotacao'] = pd.to_datetime(df['dt_cotacao'])
-    st.line_chart(df.set_index('dt_cotacao')[campo])
+
+    # altair sem .interactive() de proposito -- st.line_chart (vega-lite) deixa zoom/pan
+    # ligado por padrao e nao tem opcao pra desligar; aqui o grafico so muda pelos
+    # controles (acao/cotacao/periodo), nunca por interacao direta do mouse.
+    grafico = alt.Chart(df).mark_line().encode(
+        x=alt.X('dt_cotacao:T', title=None),
+        y=alt.Y(f'{campo}:Q', title=None),
+    )
+    st.altair_chart(grafico, use_container_width=True)
 
 
 def tela_principal():
