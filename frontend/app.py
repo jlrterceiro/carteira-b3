@@ -510,7 +510,10 @@ def tela_acoes():
     # on_select='rerun') antes de montar o grafico -- o widget ja chega com o valor da
     # interacao que disparou ESSE rerun (Streamlit atualiza session_state antes do script
     # rodar de novo), entao a metrica acima reflete a selecao atual, nao a anterior.
-    chart_key = f'grafico_cotacao_{ticker}_{campo}'
+    # periodo entra na key de proposito -- mudar acao/cotacao/periodo cria um widget novo
+    # (sem selecao antiga), em vez de carregar um intervalo que nao faz mais sentido pro
+    # novo eixo x.
+    chart_key = f'grafico_cotacao_{ticker}_{campo}_{inicio}_{fim}'
     estado_anterior = st.session_state.get(chart_key)
     limites = ((estado_anterior or {}).get('selection') or {}).get('selecao', {}).get('dt_cotacao')
 
@@ -556,6 +559,12 @@ def tela_acoes():
     # permitido e arrastar pra selecionar um intervalo (brush) e ver a rentabilidade entre
     # os dois pontos -- isso nao reescala o grafico, so marca a regiao e devolve o intervalo
     # pro Python via on_select/selection_mode.
+    #
+    # clear='click' parece o pedido certo (clique simples limpa, arrasto continua
+    # funcionando) mas QUEBRA o proprio arrasto -- todo mouseup que termina um drag TAMBEM
+    # dispara um 'click' nativo do DOM (mousedown+mouseup no mesmo elemento = click, sem
+    # limiar de movimento, e o vega nao distingue os dois) -- a selecao era criada e
+    # imediatamente limpa pelo mesmo gesto. Mantido no padrao do vega-lite ('dblclick').
     brush = alt.selection_interval(encodings=['x'], name='selecao')
     grafico = alt.Chart(df).mark_line().encode(
         x=alt.X('dt_cotacao:T', title=None),
