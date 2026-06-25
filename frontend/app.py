@@ -518,29 +518,59 @@ def tela_acoes():
         y=alt.Y(f'{campo}:Q', title=None),
     ).add_params(brush)
 
-    evento = st.altair_chart(
-        grafico, use_container_width=True,
-        on_select='rerun', key=f'grafico_cotacao_{ticker}_{campo}',
-    )
+    # le a selecao da renderizacao ANTERIOR (guardada por key em session_state pelo
+    # on_select='rerun') antes de montar o grafico, pra já incluir a anotacao na mesma
+    # renderizacao -- sem isso, a anotacao só apareceria um rerun depois de soltar o mouse.
+    chart_key = f'grafico_cotacao_{ticker}_{campo}'
+    estado_anterior = st.session_state.get(chart_key)
+    limites = ((estado_anterior or {}).get('selection') or {}).get('selecao', {}).get('dt_cotacao')
 
-    intervalo = (evento.get('selection') or {}).get('selecao') if evento else None
-    limites = (intervalo or {}).get('dt_cotacao')
+    sub = None
     if limites:
         # o vega devolve o intervalo em milissegundos desde epoch -- sem unit='ms',
-        # pd.to_datetime interpreta como nanosegundos e o filtro abaixo fica vazio
-        # silenciosamente (sem erro nenhum).
+        # pd.to_datetime interpreta como nanosegundos e o filtro fica vazio silenciosamente.
         ts_inicio, ts_fim = sorted(limites)
         sub = df[
             (df['dt_cotacao'] >= pd.to_datetime(ts_inicio, unit='ms')) &
             (df['dt_cotacao'] <= pd.to_datetime(ts_fim, unit='ms'))
         ]
-        if len(sub) >= 2:
-            valor_inicial = sub.iloc[0][campo]
-            valor_final = sub.iloc[-1][campo]
-            pct = (valor_final / valor_inicial - 1) * 100
-            dt_ini = sub.iloc[0]['dt_cotacao'].strftime('%d/%m/%Y')
-            dt_fim = sub.iloc[-1]['dt_cotacao'].strftime('%d/%m/%Y')
-            st.metric(f'Variação de {dt_ini} até {dt_fim}', f'{pct:.2f}%')
+        if len(sub) < 2:
+            sub = None
+
+    if sub is not None:
+        valor_inicial = sub.iloc[0][campo]
+        valor_final = sub.iloc[-1][campo]
+        pct = (valor_final / valor_inicial - 1) * 100
+        dias = (sub.iloc[-1]['dt_cotacao'] - sub.iloc[0]['dt_cotacao']).days
+        # juros compostos pra anualizar, nunca regra de tres simples sobre o periodo.
+        pct_anual = ((1 + pct / 100) ** (365 / dias) - 1) * 100 if dias > 0 else None
+        dt_ini = sub.iloc[0]['dt_cotacao'].strftime('%d/%m/%Y')
+        dt_fim = sub.iloc[-1]['dt_cotacao'].strftime('%d/%m/%Y')
+
+        texto = f'{pct:+.2f}%'
+        if pct_anual is not None:
+            texto += f'  (anualizada: {pct_anual:+.2f}%)'
+
+        # anotacao tipo "mini janela" perto de onde o arrasto terminou, na horizontal (x =
+        # fim da selecao). Na vertical NAO usa o valor da linha nesse ponto -- se a selecao
+        # termina perto do topo do grafico, a caixa fica cortada pelo clip da area de
+        # plotagem (bug visto na primeira versao); ancora no maximo da serie em vez disso,
+        # sempre dentro da area visivel.
+        y_anotacao = df[campo].max()
+        texto_df = pd.DataFrame([{'dt_cotacao': sub.iloc[-1]['dt_cotacao'], campo: y_anotacao, 'texto': texto}])
+        fundo = alt.Chart(texto_df).mark_rect(
+            width=215, height=28, cornerRadius=4, color='#262730', opacity=0.92,
+            align='left', baseline='top', dx=10, dy=4,
+        ).encode(x='dt_cotacao:T', y=f'{campo}:Q')
+        anotacao = alt.Chart(texto_df).mark_text(
+            align='left', baseline='middle', dx=18, dy=18, fontSize=12.5, fontWeight='bold', color='white',
+        ).encode(x='dt_cotacao:T', y=f'{campo}:Q', text='texto:N')
+        grafico = grafico + fundo + anotacao
+
+    evento = st.altair_chart(grafico, use_container_width=True, on_select='rerun', key=chart_key)
+
+    if sub is not None:
+        st.metric(f'Variação de {dt_ini} até {dt_fim}', f'{pct:+.2f}%', f'{pct_anual:+.2f}% anualizada' if pct_anual is not None else None)
     else:
         st.caption('Arraste sobre o gráfico pra selecionar um intervalo e ver a variação entre as duas datas.')
 
