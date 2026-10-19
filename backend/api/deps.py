@@ -1,11 +1,6 @@
-import os
-import sys
-
 from fastapi import Cookie, HTTPException, status
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from db_lib import get_conn
-
+from db import get_conn
 from security import decodifica_token
 
 

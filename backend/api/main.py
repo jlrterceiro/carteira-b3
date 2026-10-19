@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import acoes
 import auth
 import carteira
+import perfil
 
 app = FastAPI(title='Scraper API')
 
@@ -23,6 +24,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(carteira.router)
 app.include_router(acoes.router)
+app.include_router(perfil.router)
 
 
 @app.get('/')

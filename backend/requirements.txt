@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+psycopg2-binary
+bcrypt
+pyjwt
+pydantic[email]
+requests
+urllib3
+openpyxl
+python-multipart

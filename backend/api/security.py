@@ -1,14 +1,10 @@
 import os
-import sys
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from db_lib import load_dotenv  # garante que JWT_SECRET do .env esta carregado
-
-load_dotenv()
+import db  # noqa: F401  (carrega o .env antes de ler JWT_SECRET)
 
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = 'HS256'
