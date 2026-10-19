@@ -39,7 +39,7 @@ vm_recente AS (
 ),
 preco_recente AS (
     SELECT DISTINCT ON (id_ativo) id_ativo, vl_fechamento, dt_cotacao
-    FROM tb_cotacao
+    FROM tb_cotacao_ajustada
     ORDER BY id_ativo, dt_cotacao DESC
 ),
 dre_anual AS (
