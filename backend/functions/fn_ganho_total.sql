@@ -52,9 +52,7 @@ AS $$
         HAVING SUM(p.qt_ativo) > 0
     ),
     cotacao_atual AS (
-        SELECT DISTINCT ON (id_ativo) id_ativo, vl_fechamento AS vl_preco_atual
-        FROM public.tb_cotacao_ajustada
-        ORDER BY id_ativo, dt_cotacao DESC
+        SELECT id_ativo, vl_preco_atual FROM public.vw_cotacao_atual
     ),
     nao_realizado AS (
         SELECT

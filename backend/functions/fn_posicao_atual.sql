@@ -11,6 +11,7 @@
 
 -- troca de assinatura (ganhou p_id_corretora): sem o DROP ficariam duas versoes e a chamada de 1 argumento viraria ambigua
 DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT);
+DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT, INTEGER);
 CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL, p_id_corretora INTEGER DEFAULT NULL)
 RETURNS TABLE (
     sg_ticker TEXT,
@@ -21,7 +22,12 @@ RETURNS TABLE (
     data_cotacao DATE,
     vl_posicao NUMERIC,
     ganho_capital NUMERIC,
-    ganho_capital_pct NUMERIC
+    ganho_capital_pct NUMERIC,
+    preco_anterior NUMERIC,
+    var_dia_pct NUMERIC,
+    ganho_dia NUMERIC,
+    dh_cotacao TIMESTAMP,
+    ds_fonte TEXT
 )
 LANGUAGE sql
 AS $$
@@ -38,14 +44,6 @@ AS $$
           AND (p_id_corretora IS NULL OR p.id_corretora = p_id_corretora)
         GROUP BY p.id_ativo
         HAVING SUM(p.qt_ativo) > 0
-    ),
-    cotacao_atual AS (
-        SELECT DISTINCT ON (id_ativo)
-            id_ativo,
-            vl_fechamento AS vl_preco_atual,
-            dt_cotacao
-        FROM public.tb_cotacao_ajustada
-        ORDER BY id_ativo, dt_cotacao DESC
     )
     SELECT
         a.sg_ticker,
@@ -56,9 +54,14 @@ AS $$
         ca.dt_cotacao AS data_cotacao,
         round(p.qt_atual * ca.vl_preco_atual, 2) AS vl_posicao,
         round(p.qt_atual * (ca.vl_preco_atual - p.vl_preco_medio), 2) AS ganho_capital,
-        round(100 * (ca.vl_preco_atual - p.vl_preco_medio) / p.vl_preco_medio, 2) AS ganho_capital_pct
+        round(100 * (ca.vl_preco_atual - p.vl_preco_medio) / p.vl_preco_medio, 2) AS ganho_capital_pct,
+        round(ca.vl_preco_anterior, 2) AS preco_anterior,
+        round(100 * (ca.vl_preco_atual / NULLIF(ca.vl_preco_anterior, 0) - 1), 2) AS var_dia_pct,
+        round(p.qt_atual * (ca.vl_preco_atual - ca.vl_preco_anterior), 2) AS ganho_dia,
+        ca.dh_cotacao,
+        ca.ds_fonte
     FROM posicao p
     JOIN public.tb_ativo a ON a.id_ativo = p.id_ativo
-    LEFT JOIN cotacao_atual ca ON ca.id_ativo = p.id_ativo
+    LEFT JOIN public.vw_cotacao_atual ca ON ca.id_ativo = p.id_ativo
     ORDER BY vl_posicao DESC;
 $$;
