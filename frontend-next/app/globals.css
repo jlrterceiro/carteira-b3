@@ -63,7 +63,8 @@ th.sortable:hover { color: var(--fg); }
   padding: 16px 12px; background: var(--card); border-right: 1px solid var(--line); }
 .side .brand { font-size: 18px; margin: 0 0 16px 8px; }
 .side nav { display: flex; flex-direction: column; gap: 6px; }
-.side nav button { text-align: left; padding: 8px 12px; }
+.side nav button, .side nav a { text-align: left; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: inherit; text-decoration: none; }
+.side nav a.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .main { min-width: 0; }
 .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 16px 24px 0; }
 .filtro-corretora { display: flex; align-items: center; gap: 8px; }

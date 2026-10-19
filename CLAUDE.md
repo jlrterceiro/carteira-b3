@@ -257,6 +257,13 @@ antes de gravar e acompanhamento do recálculo.
 **A tela de Ações foi removida do Next em 2026-10-18** (componente `Acoes.tsx`, aba e link `?ticker=`), junto
 com os endpoints do backend, a pedido do usuário, que vai refazê-la; sem ela, todo o app exige login. O
 Streamlit (`frontend/`) NÃO foi alterado: a área Ações dele chama `/acoes/lista` e `/acoes/cotacao` e agora falha.
+**Rotas (2026-10-19)**: cada tela tem URL própria — `/posicao`, `/ganhos`, `/rentabilidade` e `/perfil` (grupo de rotas `app/(app)/`);
+`/` redireciona (307, `redirects()` em `next.config.ts`) pra `/posicao`. O layout `(app)/layout.tsx` é fino (server, `instant = false`
+porque tudo depende do cookie de login) e renderiza `components/Casca.tsx` (cliente: sessão, barra lateral com `Link` e realce por
+`usePathname`, topbar, filtro de corretora, tela de login NA MESMA URL quando não logado — link direto pede login e depois cai na
+própria tela). A corretora escolhida vai por contexto (`lib/sessao.tsx`, `useCorretora`) e `components/Telas.tsx` remonta cada tela
+com `key={corretora}`. Next 16 (`cacheComponents`): `instant` não pode ficar em componente cliente, por isso as páginas são server
+components finos; leia `node_modules/next/dist/docs/` antes de mexer (AGENTS.md).
 **Filtro de corretora** (`FiltroCorretora.tsx`, na barra do topo, à esquerda do menu do usuário): um seletor
 só, compartilhado por Posição, Ganhos e Rentabilidade (some no Perfil); `page.tsx` guarda a escolha em
 `localStorage` e passa `key={corretora}` às telas, que remontam e refazem as buscas ao trocar. Corretoras
