@@ -537,9 +537,10 @@ scripts de `scrape/` e leem o `.env` da raiz; o projeto inteiro é montado em `/
 `PGHOST=localhost`), metadados do Airflow em outro Postgres (container, porta 5433), UI/API em `http://localhost:8080`.
 `orquestracao/.env` (segredos, gerado, fora do git; `.env.example` mostra as chaves) e `Dockerfile` (poppler-utils pro `pdftotext`
 + `requirements.txt` dos scripts). Subir: `cd orquestracao && docker compose up -d --build`; login `admin` + `AIRFLOW_ADMIN_PASSWORD`
-do `.env`. DAGs (nascem PAUSADAS, ligar na UI): `atualiza_diario` (dias úteis 20h, uma tarefa por etapa, retry 2× a cada 10 min,
+do `.env`. Instalado e testado em 2026-10-19 (Docker 29.9.1 / Compose 5.6 via repo oficial da Docker no Fedora 44; o usuário
+precisa estar no grupo `docker`). DAGs (nascem PAUSADAS; as duas foram ligadas em 2026-10-19): `atualiza_diario` (dias úteis 20h, uma tarefa por etapa, retry 2× a cada 10 min,
 termina em `scrape/rebuild_tudo.py`; o `scrape/atualiza_diario.py` segue existindo como CLI manual) e `cotacao_intradia`
-(`*/5 10-18 * * 1-5`, substitui o `scraper_cotacao_intradia.py --loop`). Pendente: alerta de falha (e-mail/Telegram), checagem
+(`*/5 10-18 * * 1-5`, SUBSTITUIU o `scraper_cotacao_intradia.py --loop`, que foi desligado). Pendente: alerta de falha (e-mail/Telegram), checagem
 de "COTAHIST do dia chegou" e feriados.
 
 ## Pipeline de recálculo
