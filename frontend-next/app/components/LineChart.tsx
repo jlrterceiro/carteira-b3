@@ -15,12 +15,16 @@ export default function LineChart({
 
   const W = 900, H = 320, P = { l: 64, r: 16, t: 16, b: 28 };
   const ys = pontos.map((p) => p.y);
-  let min = Math.min(...ys), max = Math.max(...ys);
-  if (min === max) { min -= 1; max += 1; }
+  // uma linha a cada 20 (pontos em %), sempre com o 0 no eixo; abaixo de 0 também (-20, -40...)
+  let passo = 20;
+  while ((Math.max(0, ...ys) - Math.min(0, ...ys)) / passo > 14) passo *= 2;
+  const min = Math.floor(Math.min(0, ...ys) / passo) * passo;
+  let max = Math.ceil(Math.max(0, ...ys) / passo) * passo;
+  if (max === min) max = min + passo;
   const X = (i: number) => P.l + (i / (pontos.length - 1)) * (W - P.l - P.r);
   const Y = (v: number) => P.t + (1 - (v - min) / (max - min)) * (H - P.t - P.b);
   const d = pontos.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join("");
-  const ticks = [0, 1, 2, 3, 4].map((i) => min + ((max - min) * i) / 4);
+  const ticks = Array.from({ length: Math.round((max - min) / passo) + 1 }, (_, i) => min + i * passo);
   const h = hover != null ? pontos[hover] : null;
 
   return (
@@ -37,7 +41,7 @@ export default function LineChart({
     >
       {ticks.map((t) => (
         <g key={t}>
-          <line x1={P.l} x2={W - P.r} y1={Y(t)} y2={Y(t)} className="grid" />
+          <line x1={P.l} x2={W - P.r} y1={Y(t)} y2={Y(t)} className={t === 0 ? "grid zero" : "grid"} />
           <text x={P.l - 8} y={Y(t) + 4} textAnchor="end" className="tick">{formato(t)}</text>
         </g>
       ))}

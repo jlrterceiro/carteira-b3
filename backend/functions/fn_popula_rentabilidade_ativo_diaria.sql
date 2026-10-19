@@ -25,13 +25,15 @@
 -- So gera linha para dias em que houve cotacao do ativo (pregao) e exposicao > 0
 -- (posicao no inicio do dia ou compra no dia).
 --
--- IMPORTANTE: tb_cotacao_ajustada vem do yfinance ja ajustada retroativamente pra qualquer
--- split/grupamento futuro em relacao aquela data (e assim que o yfinance devolve
--- historico, pra manter o grafico continuo). Ja o preco de compra/venda em
--- tb_operacao e o preco nominal pago na epoca, sem esse ajuste. Por isso o preco
--- de compra/venda precisa ser dividido por fn_fator_acumulado() antes de comparar
--- com a cotacao -- senao um ativo que sofreu grupamento/split depois da operacao
--- mostra um "ganho"/"perda" de centenas de % no dia da compra/venda que nao existiu.
+-- UNIDADES (corrigido em 2026-10-18): tb_cotacao_ajustada traz o preco JA ajustado por todo evento corporativo
+-- POSTERIOR aquela data (em "acoes de hoje"), enquanto tb_posicao_diaria e tb_operacao guardam quantidade e
+-- preco NOMINAIS da epoca. Os dois lados tem que ir pra mesma unidade: o preco de compra/venda e dividido por
+-- fn_fator_acumulado(ativo, data) e a QUANTIDADE e multiplicada pelo mesmo fator (posicao do inicio do dia:
+-- fator de D-1, que ja inclui um evento que ocorra em D). Antes so o preco era convertido: o retorno de cada
+-- ativo saia certo (ganho e base escalavam juntos), mas o PESO dele na carteira ficava errado em todo dia anterior
+-- a um split/grupamento posterior (IRBR3 entrava 30x maior, CASH3 10x, SLCE3 0,4x) e distorcia o retorno
+-- agregado. Conferido contra um calculo independente em valores nominais (diferenca maxima de 3e-8 p.p. por dia).
+-- Os proventos ja estao em R$ reais (quantidade nominal x valor da epoca) e nao precisam de conversao.
 
 CREATE OR REPLACE FUNCTION public.fn_popula_rentabilidade_ativo_diaria()
 RETURNS void
@@ -58,7 +60,7 @@ BEGIN
     compras AS (
         SELECT
             o.id_carteira, o.id_corretora, o.id_ativo, o.dt_operacao AS dt_dia,
-            SUM(o.qt_ativo) AS qtd,
+            SUM(o.qt_ativo) * public.fn_fator_acumulado(o.id_ativo, o.dt_operacao) AS qtd,
             (SUM(o.qt_ativo * o.vl_preco_unitario) / SUM(o.qt_ativo))
                 / public.fn_fator_acumulado(o.id_ativo, o.dt_operacao) AS preco_medio
         FROM public.tb_operacao o
@@ -69,7 +71,7 @@ BEGIN
     vendas AS (
         SELECT
             o.id_carteira, o.id_corretora, o.id_ativo, o.dt_operacao AS dt_dia,
-            SUM(o.qt_ativo) AS qtd,
+            SUM(o.qt_ativo) * public.fn_fator_acumulado(o.id_ativo, o.dt_operacao) AS qtd,
             (SUM(o.qt_ativo * o.vl_preco_unitario) / SUM(o.qt_ativo))
                 / public.fn_fator_acumulado(o.id_ativo, o.dt_operacao) AS preco_medio
         FROM public.tb_operacao o
@@ -82,9 +84,11 @@ BEGIN
         g.id_carteira,
         g.id_corretora,
         g.id_ativo,
-        (COALESCE(pos_ini.qt_ativo, 0) * COALESCE(cot.vl_fechamento_anterior, cot.vl_abertura))
+        (COALESCE(pos_ini.qt_ativo, 0) * public.fn_fator_acumulado(g.id_ativo, cot.dt_cotacao - 1)
+            * COALESCE(cot.vl_fechamento_anterior, cot.vl_abertura))
             + (COALESCE(c.qtd, 0) * COALESCE(c.preco_medio, 0)) AS vl_base,
-        (COALESCE(pos_ini.qt_ativo, 0) - COALESCE(v.qtd, 0)) * (cot.vl_fechamento - COALESCE(cot.vl_fechamento_anterior, cot.vl_abertura))
+        (COALESCE(pos_ini.qt_ativo, 0) * public.fn_fator_acumulado(g.id_ativo, cot.dt_cotacao - 1) - COALESCE(v.qtd, 0))
+            * (cot.vl_fechamento - COALESCE(cot.vl_fechamento_anterior, cot.vl_abertura))
             + COALESCE(v.qtd, 0) * (COALESCE(v.preco_medio, 0) - COALESCE(cot.vl_fechamento_anterior, cot.vl_abertura))
             + COALESCE(c.qtd, 0) * (cot.vl_fechamento - COALESCE(c.preco_medio, 0))
             + COALESCE(pr.vl_total, 0) AS vl_ganho

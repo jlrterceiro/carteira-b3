@@ -38,7 +38,8 @@ tfoot td { font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
 .chart { width: 100%; height: auto; }
-.chart .grid { stroke: var(--line); } .chart .tick { fill: var(--muted); font-size: 11px; }
+.chart .grid { stroke: var(--line); } .chart .grid.zero { stroke: var(--muted); stroke-width: 2.5; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
 .chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
 .chart .cursor { stroke: var(--muted); stroke-dasharray: 3 3; }
 .chart .dot { fill: var(--accent); } .chart .tip { fill: var(--fg); font-size: 12px; }
@@ -78,3 +79,7 @@ th.sortable:hover { color: var(--fg); }
 .matriz th:first-child, .matriz td:first-child { font-weight: 600; }
 .matriz .sep { border-left: 2px solid var(--line); }
 .matriz .strong { font-weight: 600; }
+
+.rent-controles { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 4px 16px; }
+.rent-equiv { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 8px; }
+.rent-descricao { margin: 0 0 12px; max-width: 900px; }

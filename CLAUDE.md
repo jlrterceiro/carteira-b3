@@ -47,7 +47,7 @@ Backup do histórico de cotações do yfinance (pré-migração) no schema `bkp_
 (`tb_cotacao_pre_full`); eventos antigos de `ds_origem='yfinance'` continuam na tabela (sem scraper pra
 renová-los) até o `scraper_eventos_cvm.py` confirmá-los (viram `ds_origem='CVM'`).
 
-## Schema (public, 33 tabelas)
+## Schema (public, 36 tabelas)
 
 - `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
 - `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao_bruta` (preço REAL do dia, COTAHIST, nunca ajustado) → `tb_cotacao_ajustada` (derivada, ver "Cotações")
@@ -58,6 +58,7 @@ renová-los) até o `scraper_eventos_cvm.py` confirmá-los (viram `ds_origem='CV
   `fn_popula_provento_ajustado`, ver seção de splits abaixo e seção de proventos)
 - `tb_posicao_diaria` — snapshot diário (carteira, corretora, ativo), recalculado do zero por `fn_popula_posicao_diaria`
 - `tb_provento_recebido` — proventos cruzados com a posição na data-com, uma linha só por evento real (não preenche dia a dia)
+- `tb_provento_pagamento` — data de PAGAMENTO de cada provento (persistente, só upsert; real da B3 ou estimada), `tb_provento_recebido_tipo` (derivada: recebido por tipo + data de pagamento) e `tb_rentabilidade_caixa_diaria` (derivada: caixa de proventos por dia) — ver "Rentabilidade: métodos"
 - `tb_rentabilidade_ativo_diaria` — ganho/base em R$ por (carteira, corretora, ativo, dia de pregão)
 - `tb_rentabilidade_diaria` — rollup de `tb_rentabilidade_ativo_diaria` via `GROUPING SETS` sobre usuário/carteira/corretora (8 combinações por dia, `NULL` = "todos" naquela dimensão)
 - `tb_balanco_patrimonial` — balanço (só ações), 14 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
@@ -93,6 +94,11 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~20k lin
   (com PDF); `prototipo_eventos_cvm.py` é a versão só-leitura.
 - `atualiza_diario.py` — rotina diária completa, só dados estruturados (cotações → negócios → eventos B3 →
   reconstroi `--diario` → proventos → `fn_rebuild_tudo()`).
+- `scraper_pagamentos_b3.py [SG_EMISSOR]` — data de pagamento dos proventos (`GetListedSupplementCompany.cashDividends.paymentDate`),
+  só upsert em `tb_provento_pagamento`; roda na rotina diária depois de `scraper_proventos.py`.
+- `scraper_pagamentos_cvm.py [--aplica] [--ano-ini 2022] [SG_EMISSOR]` — data de pagamento REAL dos proventos de 2022 em diante, lida do formulário
+  "Relatório Proventos" (categoria do IPE da CVM, PDF estruturado: data-com + valor bruto + data de pagamento por ISIN);
+  só grava onde hoje há estimativa, nunca sobrescreve a da B3. Roda na rotina diária antes do da B3.
 - `descobre_trocas_ticker.py [--aplica]` — emenda séries de tickers renomeados só com o COTAHIST.
 - `scraper_proventos.py <TICKER opcional>` — dividendos/JCP/rendimento via `yfinance` (`t.dividends`), valor bruto raw (sem distinguir tipo)
 - `scraper_balanco_patrimonial.py <TICKER opcional>` — raspagem crua do balanço via dados abertos da CVM, só ações, popula só `tb_balanco_conta` (ver seção própria abaixo). `popula_balanco.py <TICKER opcional>` — curadoria local (lê `tb_balanco_conta`, sem rede) que popula `tb_balanco_patrimonial`, mesmo padrão de separação do DRE. `scraper_qt_acoes.py <TICKER opcional>` — só atualiza `qt_acoes` em `tb_balanco_patrimonial` via yfinance (`Ordinary Shares Number`), `UPDATE`-only (nunca `INSERT`, a linha já existe via `popula_balanco.py`) — ver seção própria abaixo pro motivo.
@@ -123,13 +129,26 @@ FastAPI fininho sobre as funções SQL existentes — autenticação por JWT em 
   criar outra — é assim que os 3 usuários que já existiam sem senha entram no sistema),
   `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
 - `carteira.py` — `GET /carteira/posicao` (`fn_posicao_atual`), `GET /carteira/ganhos`
-  (`fn_ganho_total`), `GET /carteira/rentabilidade?inicio=&fim=`, todos protegidos e todos com `id_corretora`
+  (`fn_ganho_total`), `GET /carteira/rentabilidade?inicio=&fim=&metodo=acoes|receber|status_invest` (padrão `acoes`, o cálculo antigo, pro
+  Streamlit não mudar), todos protegidos e todos com `id_corretora`
   opcional (sem ele = todas as corretoras do usuário); `GET /carteira/corretoras` lista as corretoras em que o
   usuário já operou (alimenta o filtro da tela). O filtro vem SEMPRE junto do usuário autenticado: id de
   corretora alheia só devolve vazio. Rentabilidade por corretora lê as linhas `(id_usuario, id_carteira NULL,
   id_corretora X)` de `tb_rentabilidade_diaria`, que o GROUPING SETS já gerava; `fn_posicao_atual(usuario,
   id_corretora)` ganhou o 2º parâmetro (assinatura trocada com `DROP`, senão a chamada de 1 argumento fica
   ambígua); `fn_ganho_total` já aceitava corretora. Soma por corretora = total (conferido nos 3 usuários).
+
+**Variação do dia e cotação intradia na Posição (2026-10-19)**: `fn_posicao_atual` devolve também `preco_anterior`, `var_dia_pct`,
+`ganho_dia` (quantidade × (atual − fechamento anterior)), `dh_cotacao` e `ds_fonte`; a tela tem "Hoje %"/"Hoje R$", o total do dia
+e refaz a busca a cada 5 min. O preço atual vem SÓ de `vw_cotacao_atual` (também usada por `fn_ganho_total`, pra Posição e
+Ganhos concordarem): **durante o pregão vale a coleta intradia, quando o COTAHIST do dia sai completo passa a valer ele**
+(regra: intradia só se `tb_cotacao_intradia.dt_pregao` > último pregão do COTAHIST do ativo; atual/anterior = último negócio /
+fechamento do último pregão; senão último e penúltimo pregão do COTAHIST). `scrape/scraper_cotacao_intradia.py [--loop] [--todos]`
+lê `cotacao.b3.com.br/mds/api/v1/instrumentQuotation/<TICKER>` (endpoint do próprio site da B3, atraso ~15 min, preço real:
+`curPrc`, `opngPric`, `minPric`, `maxPric`, `prcFlcn`=variação % do dia, `Msg.dtTm`), só dos ativos com posição aberta, só grava
+se a data da cotação for hoje, upsert em `tb_cotacao_intradia` (uma linha por ativo, sem histórico). `--loop` roda a cada 5 min
+em dia útil de 9h50 a 18h40; precisa ficar de pé (hoje é manual: `python3 scrape/scraper_cotacao_intradia.py --loop`).
+Rentabilidade/ganho realizado e as derivadas NÃO usam o intradia (continuam fechamento do COTAHIST, via `fn_rebuild_tudo`).
 
 **Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
 descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a
@@ -432,7 +451,8 @@ patrimônio, e o evento espúrio de BBAS3 1996 escondia BBAS3/GOAU3/GOAU4 do mar
 `generate_series(...::timestamp, ...)`. **Os números de referência antigos (patrimônio 88.845,59 do
 jlrterceiro) estavam errados por isso.** Referência certa em 2026-10-18: patrimônio jlrterceiro 95.615,99 /
 mario.eulalio 45.428,69 / ediesley 5.110,40; ganho total 115.611,80 / 24.692,09 / 2.210,02; rentabilidade
-composta 139,04% / 107,61% / 26,75% (a rentabilidade não mudou: lê a posição diária direto).
+composta 139,04% / 107,61% / 26,75% — **estes três números de rentabilidade estavam errados** por outro bug (unidade
+da quantidade, ver "Rentabilidade diária (TWR)"); os corretos são 159,54% / 108,92% / 54,88%.
 
 ## Eventos corporativos: reconstrução só com fontes oficiais (2026-10-18)
 
@@ -656,6 +676,78 @@ corretamente (o preço cai no ex, o provento compensa, ambos no mesmo dia).
 Pra rentabilidade composta de um período: `EXP(SUM(LN(1 + rentabilidade_pct/100))) - 1`
 sobre as linhas de `tb_rentabilidade_diaria` filtradas (NÃO somar os percentuais — isso dá
 resultado errado).
+
+**Método (análise de 2026-10-18)**: TWR com valorização diária, encadeado geometricamente. Ganho do dia por ativo =
+posição mantida × (fechamento − fechamento anterior) + vendido × (preço de venda − fechamento anterior) + comprado ×
+(fechamento − preço de compra) + proventos líquidos na data ex; base = capital exposto (posição de ontem + compras
+do dia). Retorno agregado = Σganho ÷ Σbase (média ponderada pelo capital). Aproximação conhecida: o dia inteiro pesa
+igual pra quem comprou/vendeu no pregão (Dietz com peso 1), erro de segunda ordem. É TWR só da carteira de AÇÕES: não
+modela caixa (no método `acoes`; os métodos `gips`/`status_invest` incluem o caixa dos proventos, ver "Rentabilidade:
+métodos"), nem custos/IR (as operações não trazem taxa; `vl_taxa`/`vl_ir` são todos 0). XIRR foi feito e REMOVIDO em
+2026-10-19 (decisão do usuário: ficam só TWR e Status Invest); benchmarks (CDI/Ibovespa) ainda não.
+
+**Bug de unidade (corrigido em 2026-10-18)**: `tb_cotacao_ajustada` traz preço ajustado por TODO evento posterior,
+mas `tb_posicao_diaria`/`tb_operacao` guardam quantidade e preço nominais da época; só o preço de compra/venda era
+convertido (÷ `fn_fator_acumulado`), a quantidade não. O retorno de cada ativo saía certo (ganho e base escalam
+juntos) mas o PESO dele na carteira ficava errado em todo dia anterior a um split/grupamento posterior (IRBR3 30×,
+CASH3 10×, MGLU3 ~9,5×, SLCE3 0,4×). Ex.: ediesley em 15/02/2022 tinha R$ 326 de capital real e a base somava R$ 769
+(IRBR3, posição de R$ 12,76, entrava com R$ 382,80). Agora a quantidade é multiplicada pelo mesmo fator
+(posição de D−1 × `fn_fator_acumulado(ativo, D−1)`; compras/vendas do dia × `fn_fator_acumulado(ativo, D)`).
+Validado contra um cálculo independente em valores NOMINAIS (sem série ajustada, evento tratado só no dia em que
+ocorre): diferença máxima de 3e-8 p.p. em todos os dias dos 3 usuários. Efeito no acumulado: jlrterceiro 139,10% →
+159,54%, mario 107,61% → 108,92%, ediesley 26,25% → 54,88% (2022: 4,48% → 30,16%). A conferência "ao centavo" da
+migração do yfinance comparava o código com ele mesmo e não podia ver isso. Teste de regressão em
+`test_validacoes.sql` (base = quantidade nominal × preço nominal da véspera; pegou 4.048 linhas na versão antiga).
+`fn_popula_rentabilidade_acao_diaria` (por ação) NÃO tinha o defeito (um ativo só: o erro cancela).
+
+**Pendente — dia sem negócio** (efeito medido, ainda NÃO corrigido): `tb_cotacao_*` só tem dias COM negócio do ativo
+(COTAHIST), então um ativo sem negócio no dia fica fora do numerador E do denominador. Com calendário de pregão e
+preço carregado o acumulado muda −0,43 p.p. (jlrterceiro) e +0,49 (ediesley). O yfinance preenchia todos os dias.
+Também pendente: `LN(1 + pct/100)` na API quebra se algum dia der ≤ −100% (nunca ocorreu; pior dia é −8,3%).
+
+**Comparação com o Status Invest** (jlrterceiro, ano a ano: 3,40 / 64 / −7,19 / 42,12 em 2022–2025): nenhuma variante
+reproduz (TWR com dividendos 8,22 / 70,75 / −8,43 / 54,72; só preço −1,31 / 56,36 / −16,67 / 31,26; Dietz −8,50 /
+70,81 / −8,29 / 51,84). Hipóteses não confirmadas: a carteira dele inclui FII/BDR (os extratos têm DEVA11, NUBR33...),
+dividendo por data de pagamento, ou outra fórmula. Proventos conferidos contra o extrato de Movimentação da B3
+(abr–out/2026): MTRE3, LOGG3, RECV3, EVEN3 e BRBI11 batem ao centavo; os demais diferem só por calendário (data ex ×
+pagamento). Proventos de 2025 (R$ 25,6 mil, ~23 p.p. do retorno do jlrterceiro) ainda NÃO validados: falta o extrato
+de Movimentação de 2025.
+
+## Rentabilidade: métodos (2026-10-19)
+
+A tela de Rentabilidade tem um seletor de método (dropdown "Método", igual ao de corretora; `Rentabilidade.tsx`;
+escolha lembrada em `localStorage`, padrão TWR; período padrão "Total"). O card do gráfico mostra também a rentabilidade
+MENSALIZADA e ANUALIZADA do período, equivalentes compostos `(1+T)^(ref/dias) − 1` (ref = 365,25/12 ou 365; dias corridos do
+primeiro ao último ponto; mensal só com ≥ 30 dias, anual só com ≥ 60, senão "—"). Os dois são TWR diário encadeado, mudando só o tratamento do dividendo:
+
+| Método (API) | Dividendo conta em | Depois |
+|---|---|---|
+| **TWR (proventos a receber)** (`receber`, 1º e padrão) | data ex | fica na carteira, sem render, só até o dia do PAGAMENTO; aí sai (saque ou reinvestimento, que reaparece como compra) |
+| **Status Invest** (`status_invest`) | data de PAGAMENTO | fica na carteira como caixa, sem render, pra sempre |
+| **Só ações** (`acoes`, só API, usado pelo Streamlit) | data ex | SAI da carteira (o cálculo antigo; mede a escolha das ações sem caixa) |
+
+Cálculo: `receber = ganho / (base + vl_receber_ini)`; `status_invest = (ganho − prov_ex + prov_pgto) / (base + caixa_pgto_ini)`;
+`vl_receber_ini` = proventos com ex < dia e pagamento > dia (a receber no início do dia), `caixa_pgto_ini` = soma acumulada dos
+pagos até o início do dia (`tb_rentabilidade_caixa_diaria`, por usuário e corretora; NULL = todas). O caixa que não rende é
+um LIMITE INFERIOR do efeito. A hipótese de que o Status Invest funciona assim NÃO foi confirmada na documentação dele; vem do
+encaixe numérico. Resultados em 2026-10-19 (datas de pagamento reais da CVM/B3 + estimadas pela mediana da empresa),
+jlrterceiro 2022 / 23 / 24 / 25 (Status Invest real: 3,40 / 64,00 / −7,19 / 42,12): `status_invest` 4,52 / 64,48 / −7,88 / 41,83;
+`receber` 8,26 / 68,71 / −8,34 / 53,62. Acumulado jlrterceiro / mario / ediesley: `receber` 155,66 / 106,82 / 54,81;
+`status_invest` 125,38 / 96,29 / 58,25; `acoes` 159,54 / 108,92 / 54,88.
+
+**Data de pagamento**: a B3 só informa os últimos ~12 meses (`GetListedSupplementCompany`, `cashDividends`:
+`label`, `lastDatePrior`=data-com, `paymentDate`); conferido contra o extrato de Movimentação: 35 de 35 batem.
+`tb_provento_pagamento` é persistente (o scraper de proventos apaga e regrava `tb_provento`, ela não) e acumula a
+data real com o tempo; evento sem data real recebe ESTIMATIVA (`fl_estimado=true`): data-com + mediana do atraso
+observado da MESMA EMPRESA e tipo (≥ 1 observação), senão da mesma empresa em qualquer tipo, senão 1 ano (365 dias) — regra do
+usuário —, nunca antes do ex. A B3 usa 31/12/9999 pra "a definir": ignorado (vira estimativa). Segunda fonte (2026-10-19): formulários "Relatório Proventos" da CVM (`scraper_pagamentos_cvm.py`), de 2022 em diante,
+casados por emissor (CNPJ) + data-com + valor bruto por ação (ou data única); contra as 602 datas que a B3 também tem, 96% batem
+(as divergências são JCP com várias parcelas/datas "a definir" e erros da própria B3, ex.: 9999-12-31). Formulários de 2022 misturam
+dia/mês e mês/dia: só aceita quando uma leitura é a única válida depois da data-com. Hoje ~2,5 mil reais e ~11,5 mil estimadas
+(antes de 2022 tudo é estimado, então os anos antigos são aproximados). Casamento: `(tipo, data-com)`, procurando a data-com até 5
+dias antes do pregão anterior ao ex. Pagamento em dia sem pregão entra no 1º dia da série ≥ a data.
+
+Testes em `test_validacoes.sql`: proventos por tipo somam o recebido; pagamento ≥ ex; caixa acumulado = total de proventos recebidos.
 
 **Não trata `TRANSF`** (transferência entre carteira/corretora) — só `fn_popula_posicao_diaria`
 trata isso hoje. Se uma transferência acontecer, o dia da transferência vai calcular

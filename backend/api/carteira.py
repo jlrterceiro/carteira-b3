@@ -1,7 +1,7 @@
 import math
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from deps import get_current_user, get_db
 
@@ -107,71 +107,62 @@ def ganhos(id_corretora: int | None = None, usuario=Depends(get_current_user), c
     return linhas
 
 
+# Retorno diario (em %) por metodo, sobre tb_rentabilidade_diaria r + tb_rentabilidade_caixa_diaria k:
+#   receber        : TWR com proventos A RECEBER. O provento (liquido) conta no numerador na data ex e fica no denominador,
+#                    sem render, ate o dia do pagamento, quando sai (saque ou reinvestimento).
+#   status_invest  : o provento conta so na data de PAGAMENTO (real ou estimada) e o caixa fica no denominador PARA SEMPRE,
+#                    sem render. Reproduz o Status Invest com folga de ~1 ponto.
+#   acoes          : TWR so das acoes (provento sai da carteira no ex). Nao aparece na tela: e o padrao do endpoint so pra
+#                    o Streamlit continuar igual.
+METODOS = {
+    'acoes': 'r.rentabilidade_pct',
+    'receber': '100.0 * r.vl_ganho / NULLIF(r.vl_base + COALESCE(k.vl_receber_ini, 0), 0)',
+    'status_invest': '100.0 * (r.vl_ganho - COALESCE(k.vl_prov_ex, 0) + COALESCE(k.vl_prov_pgto, 0))'
+                     ' / NULLIF(r.vl_base + COALESCE(k.vl_caixa_pgto_ini, 0), 0)',
+}
+
+
 @router.get('/rentabilidade')
 def rentabilidade(
     inicio: date | None = None,
     fim: date | None = None,
     id_corretora: int | None = None,
+    metodo: str = 'acoes',
     usuario=Depends(get_current_user),
     conn=Depends(get_db),
 ):
+    if metodo not in METODOS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f'metodo invalido (use {", ".join(METODOS)})')
     fim = fim or date.today()
+    # a expressao vem de um dicionario fixo (nunca do cliente), entao interpolar aqui e seguro
+    serie = f'''
+        WITH s AS (
+            SELECT r.dt_dia, {METODOS[metodo]} AS pct
+            FROM public.tb_rentabilidade_diaria r
+            LEFT JOIN public.tb_rentabilidade_caixa_diaria k
+                   ON k.id_usuario = r.id_usuario AND k.dt_dia = r.dt_dia AND k.id_corretora IS NOT DISTINCT FROM r.id_corretora
+            WHERE r.id_usuario = %s AND r.id_carteira IS NULL AND r.id_corretora IS NOT DISTINCT FROM %s::int
+              AND r.dt_dia <= %s AND (%s::date IS NULL OR r.dt_dia >= %s)
+        )
+    '''
+    params = (usuario['id_usuario'], id_corretora, fim, inicio, inicio)
+    composto = 'round((exp(sum(ln(1 + pct / 100.0))) - 1) * 100, 4)'
 
     with conn.cursor() as cur:
-        cur.execute(
-            '''
-            SELECT dt_dia, rentabilidade_pct
-            FROM public.tb_rentabilidade_diaria
-            WHERE id_usuario = %s AND id_carteira IS NULL AND id_corretora IS NOT DISTINCT FROM %s::int
-              AND dt_dia <= %s
-              AND (%s::date IS NULL OR dt_dia >= %s)
-            ORDER BY dt_dia
-            ''',
-            (usuario['id_usuario'], id_corretora, fim, inicio, inicio),
-        )
+        cur.execute(serie + 'SELECT dt_dia, pct FROM s WHERE pct IS NOT NULL ORDER BY dt_dia', params)
         diaria = [{'dt_dia': row[0].isoformat(), 'rentabilidade_pct': float(row[1])} for row in cur.fetchall()]
 
-        cur.execute(
-            '''
-            SELECT to_char(date_trunc('month', dt_dia), 'YYYY-MM') AS periodo,
-                   round((exp(sum(ln(1 + rentabilidade_pct / 100.0))) - 1) * 100, 4) AS rentabilidade_pct
-            FROM public.tb_rentabilidade_diaria
-            WHERE id_usuario = %s AND id_carteira IS NULL AND id_corretora IS NOT DISTINCT FROM %s::int
-              AND dt_dia <= %s
-              AND (%s::date IS NULL OR dt_dia >= %s)
-            GROUP BY 1
-            ORDER BY 1
-            ''',
-            (usuario['id_usuario'], id_corretora, fim, inicio, inicio),
-        )
-        mensal = [{'periodo': row[0], 'rentabilidade_pct': float(row[1])} for row in cur.fetchall()]
+        # pct <= -100 (preco zerado por erro de dado) faria o LN falhar e derrubaria a tela inteira: fica de fora
+        def por_periodo(unidade, formato):
+            cur.execute(serie + f"SELECT to_char(date_trunc('{unidade}', dt_dia), '{formato}') AS periodo, {composto} "
+                                "FROM s WHERE pct > -100 GROUP BY 1 ORDER BY 1", params)
+            return [{'periodo': row[0], 'rentabilidade_pct': float(row[1])} for row in cur.fetchall()]
 
-        cur.execute(
-            '''
-            SELECT to_char(date_trunc('year', dt_dia), 'YYYY') AS periodo,
-                   round((exp(sum(ln(1 + rentabilidade_pct / 100.0))) - 1) * 100, 4) AS rentabilidade_pct
-            FROM public.tb_rentabilidade_diaria
-            WHERE id_usuario = %s AND id_carteira IS NULL AND id_corretora IS NOT DISTINCT FROM %s::int
-              AND dt_dia <= %s
-              AND (%s::date IS NULL OR dt_dia >= %s)
-            GROUP BY 1
-            ORDER BY 1
-            ''',
-            (usuario['id_usuario'], id_corretora, fim, inicio, inicio),
-        )
-        anual = [{'periodo': row[0], 'rentabilidade_pct': float(row[1])} for row in cur.fetchall()]
+        mensal = por_periodo('month', 'YYYY-MM')
+        anual = por_periodo('year', 'YYYY')
 
-        cur.execute(
-            '''
-            SELECT round((exp(sum(ln(1 + rentabilidade_pct / 100.0))) - 1) * 100, 4)
-            FROM public.tb_rentabilidade_diaria
-            WHERE id_usuario = %s AND id_carteira IS NULL AND id_corretora IS NOT DISTINCT FROM %s::int
-              AND dt_dia <= %s
-              AND (%s::date IS NULL OR dt_dia >= %s)
-            ''',
-            (usuario['id_usuario'], id_corretora, fim, inicio, inicio),
-        )
+        cur.execute(serie + f'SELECT {composto} FROM s WHERE pct > -100', params)
         total_row = cur.fetchone()
         total_pct = float(total_row[0]) if total_row and total_row[0] is not None else None
 
-    return {'diaria': diaria, 'mensal': mensal, 'anual': anual, 'total_pct': total_pct}
+    return {'metodo': metodo, 'diaria': diaria, 'mensal': mensal, 'anual': anual, 'total_pct': total_pct}

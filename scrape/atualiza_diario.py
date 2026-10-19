@@ -36,6 +36,8 @@ def main():
     passo('eventos pela oscilacao oficial (arquivo diario)', [py, 'scrape/reconstroi_eventos.py', '--diario', '--aplica'])
     if '--sem-proventos' not in sys.argv:
         passo('proventos (B3)', [py, 'scrape/scraper_proventos.py'])
+        passo('datas de pagamento dos proventos (formularios da CVM, 2022+)', [py, 'scrape/scraper_pagamentos_cvm.py', '--aplica'])
+        passo('datas de pagamento dos proventos (B3)', [py, 'scrape/scraper_pagamentos_b3.py'])
     from db_lib import get_conn
     conn = get_conn()
     with conn.cursor() as cur:

@@ -22,5 +22,7 @@ BEGIN
     PERFORM public.fn_popula_rentabilidade_ativo_diaria();
     PERFORM public.fn_popula_rentabilidade_diaria();
     PERFORM public.fn_popula_rentabilidade_acao_diaria();
+    PERFORM public.fn_popula_provento_recebido_tipo();
+    PERFORM public.fn_popula_rentabilidade_caixa();
 END;
 $$;
