@@ -1,3 +1,4 @@
+import os
 from datetime import date, timedelta
 
 import altair as alt
@@ -5,7 +6,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
-API_BASE_URL = 'http://localhost:8000'
+SI_LOGO_URL = 'https://statusinvest.com.br/img/company/avatar/{}.jpg'
+
+API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
 
 PERIODOS = {
     'Últimos 30 dias': timedelta(days=30),
@@ -44,6 +47,16 @@ def cor_variacao(valor):
     if pd.isna(valor) or valor == 0:
         return ''
     return 'color: green' if valor > 0 else 'color: red'
+
+
+def busca_parentids_si(tickers):
+    """parentId do Status Invest (logo) por ticker, resolvido pela API."""
+    try:
+        resp = requests.get(f'{API_BASE_URL}/acoes/logos', params={'tickers': ','.join(tickers)}, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return {}
 
 
 def get_sessao():
@@ -109,13 +122,21 @@ def tela_login():
                 st.error('Não foi possível cadastrar. Confira os campos.')
 
 
-def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total):
+def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total, parentids=None):
+    parentids = parentids or {}
     linhas_html = []
     for _, row in df.iterrows():
+        ticker = row['sg_ticker']
+        pid = parentids.get(ticker)
+        if pid:
+            logo = f'''<img src="{SI_LOGO_URL.format(pid)}" style="width:22px;height:22px;border-radius:4px;object-fit:contain;flex-shrink:0;" onerror="this.style.display='none'">'''
+        else:
+            logo = ''
+        ticker_cell = f'<div style="display:flex;align-items:center;gap:6px;">{logo}{ticker}</div>'
         sinal = 'pos' if row['ganho_capital_pct'] > 0 else ('neg' if row['ganho_capital_pct'] < 0 else '')
         linhas_html.append(f'''
         <tr>
-            <td class="esquerda" data-sort="{row['sg_ticker']}">{row['sg_ticker']}</td>
+            <td class="esquerda" data-sort="{ticker}">{ticker_cell}</td>
             <td data-sort="{row['quantidade']}">{fmt_num(row['quantidade'], 0)}</td>
             <td data-sort="{row['preco_medio']}">{fmt_brl(row['preco_medio'])}</td>
             <td data-sort="{row['preco_atual']}">{fmt_brl(row['preco_atual'])}</td>
@@ -155,8 +176,8 @@ def tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, 
     <div class="scroll-wrap">
     <table id="tbl-patrimonio">
         <colgroup>
-            <col style="width: 11%">
             <col style="width: 13%">
+            <col style="width: 11%">
             <col style="width: 13%">
             <col style="width: 13%">
             <col style="width: 20%">
@@ -353,8 +374,14 @@ def tela_posicao():
 
     cor_total = cor_variacao(variacao_total)
 
+    cache_logos = st.session_state.get('si_parentids', {})
+    faltando = [t for t in df['sg_ticker'].tolist() if t not in cache_logos]
+    if faltando:
+        cache_logos.update(busca_parentids_si(faltando))
+        st.session_state['si_parentids'] = cache_logos
+
     altura = 136 + 40 * len(df)
-    html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total)
+    html = tabela_patrimonio_html(df, variacao_total, variacao_total_pct, valor_total, cor_total, cache_logos)
     st.components.v1.html(html, height=altura, scrolling=False)
 
 
@@ -436,10 +463,108 @@ def tela_rentabilidade():
         st.dataframe(estilo_anual, use_container_width=True, hide_index=True)
 
 
+def tela_rentabilidade_acoes():
+    # Lista de tickers com histórico para este usuário
+    cache_key = f'acoes_hist_{usuario_logado()["sg_usuario"]}'
+    if cache_key not in st.session_state:
+        resp = get_sessao().get(f'{API_BASE_URL}/carteira/acoes-historico')
+        st.session_state[cache_key] = resp.json() if resp.status_code == 200 else []
+    tickers = st.session_state[cache_key]
+
+    if not tickers:
+        st.info('Sem histórico de ações ainda. Execute o pipeline de recálculo.')
+        return
+
+    col_ticker, col_periodo = st.columns([2, 5])
+    with col_ticker:
+        ticker = st.selectbox('Ação', tickers, key='rent_acao_ticker')
+    with col_periodo:
+        escolha = st.radio('Período', list(PERIODOS.keys()), horizontal=True,
+                           index=6, key='rent_acao_periodo')  # default: Total
+
+    resp = get_sessao().get(f'{API_BASE_URL}/carteira/rentabilidade-acao',
+                            params={'ticker': ticker})
+    if resp.status_code != 200:
+        st.error('Não foi possível carregar a rentabilidade.')
+        return
+
+    dados = resp.json()
+    if not dados:
+        st.info('Sem dados para essa ação.')
+        return
+
+    df = pd.DataFrame(dados)
+    df['dt_dia'] = pd.to_datetime(df['dt_dia'])
+    df = df.dropna(subset=['vl_retorno_acumulado'])
+
+    # Filtro de período
+    hoje = date.today()
+    if escolha == 'Personalizado':
+        c1, c2 = st.columns(2)
+        inicio = c1.date_input('De', value=df['dt_dia'].min().date(), key='rent_acao_de')
+        fim = c2.date_input('Até', value=hoje, key='rent_acao_ate')
+        df = df[(df['dt_dia'].dt.date >= inicio) & (df['dt_dia'].dt.date <= fim)]
+    elif PERIODOS[escolha] is not None:
+        corte = pd.Timestamp(hoje - PERIODOS[escolha])
+        df = df[df['dt_dia'] >= corte]
+
+    if df.empty:
+        st.info('Sem dados nesse período.')
+        return
+
+    # Métrica de retorno acumulado atual
+    acumulado_atual = df['vl_retorno_acumulado'].iloc[-1]
+    primeira_data = df['dt_dia'].iloc[0].strftime('%d/%m/%Y')
+    cor = 'normal' if acumulado_atual >= 0 else 'inverse'
+    st.metric(
+        f'Retorno acumulado desde {primeira_data}',
+        fmt_pct(acumulado_atual),
+        delta_color=cor,
+    )
+
+    # Gráfico com duas camadas: linha sólida com posição, tracejada nos gaps
+    df_pos  = df[df['fl_tem_posicao']].copy()
+    df_gap  = df[~df['fl_tem_posicao']].copy()
+
+    base = alt.Chart(df).encode(
+        x=alt.X('dt_dia:T', title=None),
+        y=alt.Y('vl_retorno_acumulado:Q', title='Retorno acumulado (%)'),
+        tooltip=[
+            alt.Tooltip('dt_dia:T', title='Data', format='%d/%m/%Y'),
+            alt.Tooltip('vl_retorno_acumulado:Q', title='Acumulado (%)', format='.2f'),
+            alt.Tooltip('fl_tem_posicao:N', title='Com posição'),
+        ],
+    )
+
+    linha_posicao = alt.Chart(df_pos).mark_line(
+        strokeWidth=2, color='#2196F3',
+    ).encode(
+        x='dt_dia:T',
+        y='vl_retorno_acumulado:Q',
+    )
+
+    linha_gap = alt.Chart(df_gap).mark_line(
+        strokeWidth=1, color='#BDBDBD', strokeDash=[4, 4],
+    ).encode(
+        x='dt_dia:T',
+        y='vl_retorno_acumulado:Q',
+    )
+
+    zero = alt.Chart(pd.DataFrame({'y': [0]})).mark_rule(
+        color='#9E9E9E', strokeWidth=1, strokeDash=[2, 2],
+    ).encode(y='y:Q')
+
+    grafico = (zero + linha_gap + linha_posicao).properties(height=350)
+    st.altair_chart(grafico, use_container_width=True)
+
+    st.caption('Linha sólida = com posição  ·  Linha tracejada cinza = sem posição (gap)')
+
+
 TELAS = {
     'Patrimônio': tela_posicao,
     'Ganhos': tela_ganhos,
     'Rentabilidade': tela_rentabilidade,
+    'Rent. por Ação': tela_rentabilidade_acoes,
 }
 
 TIPOS_COTACAO = {
