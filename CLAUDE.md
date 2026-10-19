@@ -18,25 +18,39 @@ Projeto pensado pra eventualmente virar multi-usuário "de verdade" (API + front
 profissional) — por isso a separação:
 
 - `db_lib.py` (raiz) — `get_conn()` + carregamento do `.env`. Compartilhado por `scrape/` e
-  `backend/`; cada script faz `sys.path.insert(0, ...)` pra subir até a raiz e importar.
-- `scrape/` — tudo que busca dado de fonte externa (yfinance, dadosdemercado.com.br) ou de
-  arquivo (planilha de negociação) e grava no banco. `scrape/scraper_lib.py` tem só os
-  helpers de scraping HTML (`get_html`, `parse_tickers`, `normalize_ticker`, `BASE`) — não
-  tem `get_conn` mais, isso é responsabilidade do `db_lib.py`. `scrape/importados/` guarda as
-  planilhas já importadas.
+  `backend/relatorios/`; cada script faz `sys.path.insert(0, ...)` pra subir até a raiz e
+  importar. A API (`backend/api/`) NÃO usa mais: tem o próprio `backend/api/db.py` (mesma lógica,
+  procura o `.env` em `ENV_FILE`, `backend/api/`, `backend/` ou raiz) — a API e o frontend são
+  independentes, cada um com seu `requirements.txt` (`backend/requirements.txt`,
+  `frontend/requirements.txt`).
+- `scrape/` — tudo que busca dado de fonte externa (B3, CVM; yfinance ainda em migração) ou de
+  arquivo (planilha de negociação) e grava no banco. `scrape/importados/` guarda as planilhas
+  já importadas.
 - `backend/` — schema (`backend/schema/*.sql`), funções de cálculo (`backend/functions/*.sql`),
   testes de regressão (`backend/tests/test_validacoes.sql`), geradores de relatório PDF/Excel
   (`backend/relatorios/*.py`) e a API (`backend/api/`, ver seção própria abaixo).
 - `frontend/` — `app.py`, dashboard Streamlit (ver seção própria abaixo).
 
 Se trocar a fonte de dados de cotação/balanço/etc no futuro, só precisa trocar o scraper
-correspondente em `scrape/` — nada em `backend/` referencia yfinance ou dadosdemercado.com.br
-diretamente, só lê das tabelas.
+correspondente em `scrape/` — nada em `backend/` referencia a fonte externa diretamente, só lê
+das tabelas.
 
-## Schema (public, 26 tabelas)
+**Direção do projeto (decisão do usuário, 2026-10-18)**: só fontes oficiais — B3 e CVM. Sai
+yfinance e dadosdemercado.com.br; Status Invest fica só pros logos dos tickers (usado pela
+API); BCB aceito só pra CDI/SELIC e índices (Ibovespa). Escopo é só AÇÕES: FII e BDR foram
+removidos do banco (backup no schema `bkp_fii_bdr`, 18 ativos). Já migrado: cadastro
+(`scraper_cadastro_b3.py`), cotações (COTAHIST completo, 1994+, `scraper_cotacoes_b3.py`),
+proventos e eventos corporativos (B3), balanço/DRE/DFC (CVM). Os scrapers de cotação e de
+eventos do yfinance foram apagados (2026-10-18). Falta só: `qt_acoes`/valor de mercado
+(`scraper_qt_acoes.py`/`scraper_valor_mercado.py`, ainda yfinance) e CDI/índices via BCB.
+Backup do histórico de cotações do yfinance (pré-migração) no schema `bkp_cotacao`
+(`tb_cotacao_pre_full`); eventos antigos de `ds_origem='yfinance'` continuam na tabela (sem scraper pra
+renová-los) até o `scraper_eventos_cvm.py` confirmá-los (viram `ds_origem='CVM'`).
+
+## Schema (public, 33 tabelas)
 
 - `tb_usuario` → `tb_carteira` → `tb_operacao` (compra/venda/transferência/dividendo/etc, ver `tb_tipo_operacao`)
-- `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao` (histórico de preços diário)
+- `tb_emissor` → `tb_ativo` (ticker, classe ON/PN/UNIT) → `tb_cotacao_bruta` (preço REAL do dia, COTAHIST, nunca ajustado) → `tb_cotacao_ajustada` (derivada, ver "Cotações")
 - `tb_evento_corporativo` (SPLIT/GRUP, com `vl_fator`) por `id_ativo`
 - `tb_provento` (valor bruto por ação, por `id_ativo`+`dt_ex`+`ds_tipo_provento` — raw da B3
   pra ações, yfinance ainda pra FII/BDR, ver seção própria) + `vl_unitario_liquido`/
@@ -48,10 +62,8 @@ diretamente, só lê das tabelas.
 - `tb_rentabilidade_diaria` — rollup de `tb_rentabilidade_ativo_diaria` via `GROUPING SETS` sobre usuário/carteira/corretora (8 combinações por dia, `NULL` = "todos" naquela dimensão)
 - `tb_balanco_patrimonial` — balanço (só ações), 14 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
 - `tb_balanco_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM pro balanço, sem curadoria, usada por `popula_balanco.py` pra montar `tb_balanco_patrimonial` (ver seção própria abaixo)
-- `tb_balanco_patrimonial_old_yfinance` — histórica/descontinuada, balanço via yfinance, não recebe mais atualização (ver seção própria abaixo)
 - `tb_dre` — DRE (só ações), 15 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
 - `tb_dre_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM, sem curadoria, usada por `popula_dre.py` pra montar `tb_dre` (ver seção própria abaixo)
-- `tb_dre_old_yfinance` — histórica/descontinuada, DRE via yfinance, não recebe mais atualização (ver seção própria abaixo)
 - `tb_dfc` — demonstração de fluxo de caixa (só ações), 5 métricas curadas, TRIMESTRAL via dados abertos da CVM (ver seção própria abaixo)
 - `tb_dfc_conta` — auxiliar/raw: TODAS as contas do plano de contas da CVM pro fluxo de caixa, sem curadoria, usada por `popula_dfc.py` pra montar `tb_dfc` (ver seção própria abaixo)
 - `tb_valor_mercado` — snapshot de valor de mercado por dia de raspagem (`fast_info.marketCap` do yfinance), histórico se constrói rodando o scraper periodicamente
@@ -65,13 +77,26 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~20k lin
 
 ## Scripts Python (`scrape/`)
 
-- `scraper_lib.py` — helpers de scraping HTML (`get_html`, `parse_tickers`, `normalize_ticker`, `BASE`)
-- `scraper_emissores.py`, `scraper_ativos.py` — raspam dadosdemercado.com.br (`/acoes`) via regex em HTML
-- `scraper_cotacoes.py <TICKER opcional>` — histórico completo de preços via yfinance (`TICKER.SA`), substitui tudo (`DELETE` + reinsere)
-- `scraper_eventos_corporativos.py <TICKER opcional>` — splits/grupamentos via `yfinance` (`t.splits`)
+- `scraper_cadastro_b3.py [--dry-run]` — cadastro de emissores (`tb_emissor`) e ações (`tb_ativo`) direto da B3
+  (`GetInitialCompanies` + `GetDetail`, mesma API de proventos/eventos), substitui os antigos
+  scrapers do dadosdemercado (apagados). Ver seção "Cadastro (B3)" abaixo.
+- `scraper_cotacoes_b3.py <TICKER opcional> [--full|--novos]` — cotações do COTAHIST da B3 (única fonte de
+  cotação). Grava o preço REAL em `tb_cotacao_bruta`, sem ajustar nada. Padrão: incremental (só dias depois da
+  última cotação de cada ativo). `--full` substitui o histórico inteiro (1994+). `--novos` faz a carga completa
+  só dos ativos que ainda não têm nenhuma cotação (cadastro novo). Ver "Cotações (COTAHIST)" e "Cotação real ×
+  ajustada" abaixo.
+- `scraper_negocios_b3.py [DATA... | --desde DATA]` — coletor do arquivo diário de negócios consolidados da B3
+  (`tb_negocio_diario`, com a oscilação oficial), só ações do cadastro, 3 rodadas de retry.
+- `reconstroi_eventos.py [--aplica] [--diario]` — reconstrói `tb_evento_corporativo` (S1 oscilação + S2 opções + S3
+  preço, ver "Eventos corporativos: reconstrução"). Apoio: `eventos_por_oscilacao.py`, `eventos_por_opcoes.py`,
+  `compara_eventos_opcoes.py`. `scraper_eventos_cvm.py [--aplica]` — carga ÚNICA do passado via avisos da CVM
+  (com PDF); `prototipo_eventos_cvm.py` é a versão só-leitura.
+- `atualiza_diario.py` — rotina diária completa, só dados estruturados (cotações → negócios → eventos B3 →
+  reconstroi `--diario` → proventos → `fn_rebuild_tudo()`).
+- `descobre_trocas_ticker.py [--aplica]` — emenda séries de tickers renomeados só com o COTAHIST.
 - `scraper_proventos.py <TICKER opcional>` — dividendos/JCP/rendimento via `yfinance` (`t.dividends`), valor bruto raw (sem distinguir tipo)
-- `scraper_balanco_patrimonial.py <TICKER opcional>` — raspagem crua do balanço via dados abertos da CVM, só ações, popula só `tb_balanco_conta` (ver seção própria abaixo). `popula_balanco.py <TICKER opcional>` — curadoria local (lê `tb_balanco_conta`, sem rede) que popula `tb_balanco_patrimonial`, mesmo padrão de separação do DRE. `scraper_qt_acoes.py <TICKER opcional>` — só atualiza `qt_acoes` em `tb_balanco_patrimonial` via yfinance (`Ordinary Shares Number`), `UPDATE`-only (nunca `INSERT`, a linha já existe via `popula_balanco.py`) — ver seção própria abaixo pro motivo. `scraper_balanco_patrimonial_old_yfinance.py` — histórico/descontinuado, não roda mais.
-- `scraper_dre.py <TICKER opcional>` — raspagem crua da DRE via dados abertos da CVM, só ações, popula só `tb_dre_conta` (ver seção própria abaixo). `popula_dre.py <TICKER opcional>` — curadoria local (lê `tb_dre_conta`, sem rede) que popula `tb_dre`; separado do scraper de propósito, pra corrigir bug de casamento sem precisar rebaixar nada da CVM. `scraper_dre_old_yfinance.py` — histórico/descontinuado, não roda mais (ver seção própria abaixo).
+- `scraper_balanco_patrimonial.py <TICKER opcional>` — raspagem crua do balanço via dados abertos da CVM, só ações, popula só `tb_balanco_conta` (ver seção própria abaixo). `popula_balanco.py <TICKER opcional>` — curadoria local (lê `tb_balanco_conta`, sem rede) que popula `tb_balanco_patrimonial`, mesmo padrão de separação do DRE. `scraper_qt_acoes.py <TICKER opcional>` — só atualiza `qt_acoes` em `tb_balanco_patrimonial` via yfinance (`Ordinary Shares Number`), `UPDATE`-only (nunca `INSERT`, a linha já existe via `popula_balanco.py`) — ver seção própria abaixo pro motivo.
+- `scraper_dre.py <TICKER opcional>` — raspagem crua da DRE via dados abertos da CVM, só ações, popula só `tb_dre_conta` (ver seção própria abaixo). `popula_dre.py <TICKER opcional>` — curadoria local (lê `tb_dre_conta`, sem rede) que popula `tb_dre`; separado do scraper de propósito, pra corrigir bug de casamento sem precisar rebaixar nada da CVM.
 - `scraper_dfc.py <TICKER opcional>` — raspagem crua do fluxo de caixa via dados abertos da CVM, só ações, popula só `tb_dfc_conta` (ver seção própria abaixo). `popula_dfc.py <TICKER opcional>` — curadoria local (lê `tb_dfc_conta`, sem rede) que popula `tb_dfc`, mesmo padrão de separação da DRE/balanço.
 - `scraper_valor_mercado.py <TICKER opcional>` — valor de mercado via yfinance (`fast_info.marketCap`), só ações, um snapshot por dia de execução.
 - `import_operacoes.py <arquivo.xlsx> <sg_usuario>` — importa export de negociação da B3 pra carteira `Carteira Aposentadoria` do usuário informado, dedup por (ativo, tipo, data, qtd, preço) contando ocorrências já existentes. Planilhas já importadas ficam em `scrape/importados/`.
@@ -87,6 +112,7 @@ FastAPI fininho sobre as funções SQL existentes — autenticação por JWT em 
 (`JWT_SECRET` no `.env`, validade 7 dias, sem refresh token ainda). Subir com
 `uvicorn backend.api.main:app --reload` a partir da raiz do projeto; `/docs` tem o Swagger.
 
+- `db.py` — `get_conn()` + carregamento do `.env`, próprio da API (não depende de nada fora de `backend/`).
 - `security.py` — hash/verificação de senha (`bcrypt`), cria/decodifica token (`pyjwt`).
 - `deps.py` — `get_current_user` (lê o cookie, decodifica o JWT, busca o usuário em
   `tb_usuario` por `id_usuario` do token) e `get_db`. **Todo endpoint protegido usa o
@@ -97,10 +123,45 @@ FastAPI fininho sobre as funções SQL existentes — autenticação por JWT em 
   criar outra — é assim que os 3 usuários que já existiam sem senha entram no sistema),
   `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
 - `carteira.py` — `GET /carteira/posicao` (`fn_posicao_atual`), `GET /carteira/ganhos`
-  (`fn_ganho_total`), `GET /carteira/rentabilidade?inicio=&fim=`, todos protegidos.
-- `acoes.py` — `GET /acoes/lista` (tickers de ações), `GET /acoes/cotacao?ticker=&inicio=&fim=`
-  (lê `tb_cotacao` direto). **Sem `get_current_user`, de propósito** — dado de mercado, não é
-  por usuário, fica aberto pra a aba Ações do frontend (ver seção própria).
+  (`fn_ganho_total`), `GET /carteira/rentabilidade?inicio=&fim=`, todos protegidos e todos com `id_corretora`
+  opcional (sem ele = todas as corretoras do usuário); `GET /carteira/corretoras` lista as corretoras em que o
+  usuário já operou (alimenta o filtro da tela). O filtro vem SEMPRE junto do usuário autenticado: id de
+  corretora alheia só devolve vazio. Rentabilidade por corretora lê as linhas `(id_usuario, id_carteira NULL,
+  id_corretora X)` de `tb_rentabilidade_diaria`, que o GROUPING SETS já gerava; `fn_posicao_atual(usuario,
+  id_corretora)` ganhou o 2º parâmetro (assinatura trocada com `DROP`, senão a chamada de 1 argumento fica
+  ambígua); `fn_ganho_total` já aceitava corretora. Soma por corretora = total (conferido nos 3 usuários).
+
+**Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
+descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a
+carteira do usuário sem perguntar). A tabela `tb_carteira` e o `id_carteira` continuam existindo POR DENTRO (as
+funções `fn_*`, `tb_operacao` e as derivadas ainda se apoiam nelas): cada usuário tem uma só, criada no
+cadastro, e `importacao.carteira_do_usuario()` devolve a primeira. Remover de vez do schema é um refactor grande,
+não feito.
+- `acoes.py` — hoje só `GET /acoes/logos?tickers=A,B` (usado pela tabela de Posição; sem `get_current_user`, dado
+  público). **`/acoes/lista` e `/acoes/cotacao` foram REMOVIDOS em 2026-10-18** a pedido do usuário, que vai
+  refazer a funcionalidade de Ações depois (eram abertos, lendo `tb_cotacao_ajustada`, com
+  `vl_fechamento_nominal`/`vl_fechamento`/`vl_fechamento_ajustado` — as colunas continuam na tabela). O
+  `/acoes/logos` resolve ticker → `parentId` do Status Invest (logo da empresa,
+  busca externa feita pela API, com fallback ON/prefixo de 4 letras) — o frontend nunca chama
+  serviço externo direto, só a API; a imagem do logo em si ainda é carregada pelo navegador.
+
+- `perfil.py` + `importacao.py` — **perfil do usuário e upload do extrato de negociação da B3** (xlsx da Área do
+  Investidor), todos protegidos: `GET /perfil` (dados, carteiras e situação da importação: última operação e a
+  data sugerida pra baixar o próximo extrato, 7 dias antes), `POST /perfil/importacao/previa` (lê a planilha e
+  diz o que entraria, SEM gravar), `POST /perfil/importacao` (grava só as novas, numa transação, e dispara o
+  recálculo) e `GET /perfil/recalculo` (andamento). Mesma regra do `scrape/import_operacoes.py` (só COMPRA/VENDA,
+  fracionário perde o "F", duplicata = contagem de ocorrências (ativo, tipo, data, qtd, preço) já gravadas na
+  carteira — reimportar período sobreposto é seguro); a CLI continua existindo e é independente (a API não
+  importa nada de `scrape/`). Validações do arquivo: ≤5 MB, só .xlsx (magic `PK`), total descompactado ≤60 MB,
+  ≤20.000 linhas, cabeçalho exato de 9 colunas, data/quantidade/preço conferidos, `pg_advisory_xact_lock` por
+  usuário contra duplo clique. Ticker que não está em `tb_ativo` (FII/ETF/BDR — o escopo é só ação) vira
+  `ativo_desconhecido` e NÃO é importado, avisado na prévia. Corretora nova é criada com o nome da planilha (≤120
+  caracteres); a comparação com as existentes (e com `tb_corretora_historico`) ignora caixa, espaços duplos e ponto
+  final, porque a B3 grafa 'S/A' num extrato e 'S/A.' em outro (a XP chegou a ficar duplicada, ids 2 e 5; unidas em
+  2026-10-18, com alias em `tb_corretora_historico`). O recálculo (`fn_rebuild_tudo()`, ~70 s, refaz as derivadas de TODOS os usuários) roda em thread
+  depois do upload; estado em memória, vale só pra processo único (uvicorn sem `--workers`); upload durante o
+  recálculo marca "pendente" e roda de novo. Limitação: enquanto roda, as derivadas estão em transação e as
+  leituras esperam. Dependências novas em `backend/requirements.txt`: `openpyxl`, `python-multipart`.
 
 `tb_usuario.ds_senha_hash` é nullable de propósito — usuário cadastrado antes da API (direto
 no banco) não tem senha até passar pelo fluxo de reivindicação em `/auth/cadastro`.
@@ -112,7 +173,7 @@ escrita (importar operação, rodar scraper) também não estão expostos, só l
 
 Dashboard Streamlit, consome só a API (`backend/api/`) via HTTP — nunca acessa o banco
 direto. Roda com `streamlit run frontend/app.py` (precisa da API rodando em paralelo,
-`http://localhost:8000` por padrão — ver `API_BASE_URL` no topo do arquivo). Guarda a sessão
+`http://localhost:8000` por padrão — configurável pela variável de ambiente `API_BASE_URL`). Guarda a sessão
 HTTP (com o cookie do JWT) em `st.session_state`, que persiste entre os reruns do Streamlit
 pra a mesma sessão de navegador — login fica "lembrado" enquanto a aba estiver aberta.
 
@@ -125,13 +186,11 @@ Rentabilidade. **Ações** — informação pública sobre ativos individuais, s
 poucos. Primeiro incremento: gráfico de cotação de uma ação escolhida (`st.selectbox`, lista
 de `GET /acoes/lista`), com select de 3 opções de ajuste e o mesmo seletor de período
 (`PERIODOS`) já usado na aba Rentabilidade — `GET /acoes/cotacao?ticker=&inicio=&fim=`, lê
-direto de `tb_cotacao`:
+direto de `tb_cotacao_ajustada`:
 - "Sem ajuste (nominal na época)" (`vl_fechamento_nominal`) — preço real como negociou
-  naquele dia, calculado a partir de `vl_fechamento` MULTIPLICADO por
-  `fn_fator_acumulado(id_ativo, dt_cotacao)` na própria query da API (desfaz o ajuste
-  retroativo de split/grupamento que o yfinance já embute em `vl_fechamento`, mesma direção
-  já usada pra desfazer ajuste de provento yfinance — ver "Splits/grupamentos retroativos").
-  `tb_cotacao` não guarda essa coluna pronta, é sempre derivada na hora.
+  naquele dia, coluna da própria `tb_cotacao_ajustada` (cópia de `tb_cotacao_bruta.vl_fechamento`,
+  o que o COTAHIST informou). Desde 2026-10-18 o real é a fonte e o ajustado é que é derivado (ver
+  "Cotações").
 - "Ajustada apenas por eventos corporativos" (`vl_fechamento`)
 - "Ajustada por eventos corporativos e dividendos" (`vl_fechamento_ajustado`)
 
@@ -164,6 +223,292 @@ projeto — NUNCA somar percentual direto). O frontend recalcula a curva acumula
 em cima da série diária pra plotar o gráfico (mesma fórmula, só que ponto a ponto); o valor
 final dessa curva sempre bate com `total_pct` vindo da API.
 
+## Frontend oficial (`frontend-next/`)
+
+**É a interface oficial desde 2026-10-18** (decisão do usuário); o Streamlit (`frontend/`) fica como
+estava e não recebe funcionalidade nova. Next.js (App Router, TypeScript, sem libs de UI/gráfico — o gráfico é
+um SVG próprio em `app/components/LineChart.tsx`): login/cadastro, Posição, Ganhos e Rentabilidade (barra lateral `aside.side` colada na
+borda esquerda da TELA, altura toda, com o título "Minha Carteira" no topo e os botões em coluna; conteúdo ocupa o
+resto da largura, menu do usuário no canto superior direito; filtros de período da Rentabilidade ancorados à
+direita, `.chips.right`; em tela estreita a barra vira uma faixa horizontal no topo) e **Perfil**,
+que NÃO é aba: abre pelo menu do usuário (nome + seta no canto superior direito,
+`app/components/MenuUsuario.tsx`, com Perfil e Sair; fecha ao clicar fora ou com Esc). `app/components/Perfil.tsx`:
+dados do usuário, última operação importada, data sugerida pro próximo extrato da B3 e upload do .xlsx com prévia
+antes de gravar e acompanhamento do recálculo.
+**A tela de Ações foi removida do Next em 2026-10-18** (componente `Acoes.tsx`, aba e link `?ticker=`), junto
+com os endpoints do backend, a pedido do usuário, que vai refazê-la; sem ela, todo o app exige login. O
+Streamlit (`frontend/`) NÃO foi alterado: a área Ações dele chama `/acoes/lista` e `/acoes/cotacao` e agora falha.
+**Filtro de corretora** (`FiltroCorretora.tsx`, na barra do topo, à esquerda do menu do usuário): um seletor
+só, compartilhado por Posição, Ganhos e Rentabilidade (some no Perfil); `page.tsx` guarda a escolha em
+`localStorage` e passa `key={corretora}` às telas, que remontam e refazem as buscas ao trocar. Corretoras
+vêm de `GET /carteira/corretoras`.
+**Rentabilidade**: filtros de período (30 dias … Total) controlam o gráfico e o total do topo; abaixo, a matriz
+"Rentabilidade por mês" (`Matriz` em `Rentabilidade.tsx`) tem uma linha por ano (mais recente em cima), 12
+colunas Jan–Dez, "Ano" e "Acumulada" (juros compostos desde o primeiro ano até o fim daquele ano). A matriz SEMPRE
+usa o histórico inteiro (`GET /carteira/rentabilidade` sem `inicio`, segunda chamada) e não segue o filtro, porque só
+faz sentido com meses completos; mês sem dado fica "—". Valores conferidos contra o cálculo direto em SQL
+(`EXP(SUM(LN(1+pct/100)))-1` sobre `tb_rentabilidade_diaria`).
+O helper `api()` não força `Content-Type: json` quando o corpo é `FormData` (o navegador precisa definir o
+boundary do upload). Consome só a API, com cookie
+(`credentials: 'include'`); URL da API em `NEXT_PUBLIC_API_BASE_URL` (padrão
+`http://localhost:8000`). Rodar: `cd frontend-next && npm run dev` (porta 3000, já liberada no
+CORS da API). Ainda não tem a aba "Rent. por Ação" (só existe no Streamlit).
+
+## Cadastro (B3)
+
+`scraper_cadastro_b3.py` pagina `GetInitialCompanies` (~3,5k empresas, a maioria emissor de
+dívida — `type='7'` é descartado sem chamar o detalhe) e chama `GetDetail` pro resto
+(`codeCVM`), que devolve `otherCodes` (ticker + ISIN), setor B3 (`industryClassification`,
+usa "." onde o dadosdemercado usava ",") e site. Casa com `tb_emissor` por **CNPJ** (a B3
+devolve o CNPJ como número, sem zeros à esquerda — `BBAS` vem `191` — por isso `zfill(14)`).
+Nunca recria nem renomeia linha existente (preserva `id_emissor`/`id_ativo`): pra emissor
+existente só preenche `ds_site`/`info` quando estiverem vazios.
+
+Quais tickers entram: ISIN tipo `ACN` (ação, classe pelo par de letras 10-11: `OR`=ON,
+`P?`=PN) ou, só pra ticker terminado em `11`, ISIN `CDA` (maioria das units), `UNT` (BPAC11)
+ou `TRV` (PSVM11) → classe UNIT. Sufixo `9x` (97/98/99) é direito/recibo, descartado. Debênture,
+BDR, FII, ETF ficam de fora por não terem ISIN `ACN`/unit.
+
+**Papéis B3 × CVM (decisão do usuário, 2026-10-18)**: B3 é a autoridade pro que NEGOCIA (tickers,
+ISIN, classe, listagem, cotações, eventos, proventos); a CVM (`cad_cia_aberta.csv`, baixado pro cache
+`scrape/cvm_cache/`) é a autoridade pra ENTIDADE JURÍDICA (CNPJ, razão social, situação, setor) — e é
+o CNPJ que liga o dado financeiro. A comparação B3×banco é pela **raiz do CNPJ** (8 primeiros dígitos):
+a mesma empresa pode ter estabelecimentos diferentes em cada fonte (TUPY: B3 `/0003-00` filial, CVM
+`/0001-49` matriz) e isso NÃO é divergência — o CNPJ gravado fica o da CVM e o da B3 vai pra
+`info.cnpj_b3` só como rastreio. Raiz diferente = outra pessoa jurídica e aparece como divergência. O
+scraper também avisa quando um emissor com ticker ainda listado tem o CNPJ cancelado/suspenso na CVM.
+
+**CNPJ que muda (`info.cnpjs_anteriores`)**: caso BRST — a CVM cancelou a holding Brisanet
+Participações (`19.796.586/0001-70`) em 2024-12-04 e a Brisanet Serviços de Telecomunicações
+(`04.601.397/0001-28`) assumiu a listagem em 2024-12-05 (BRIT3 → BRST3). `tb_emissor.nr_cnpj` guarda o
+CNPJ ATUAL e `info.cnpjs_anteriores = [{"cnpj": "...", "ate": "2024-09-30"}]` os antigos com o último
+`DT_REFER` que vale pra eles; `scrape/cnpj_emissor.py` expande isso e os scrapers de DRE/balanço/DFC
+leem o CNPJ antigo até `ate` e o novo depois (BRST passou de 19 pra 27 períodos de DRE, 2020-12 →
+2026-03; o 4T24 derivado bate com o trimestre publicado). Os scrapers só fazem upsert, nunca apagam,
+então ler dois CNPJs em sequência é seguro. `scraper_insider.py`/`scraper_recompra.py` ainda NÃO usam
+`cnpjs_anteriores` (pendente).
+
+`fl_ativo` é sincronizado com o que a B3 lista hoje (quem saiu fica `false` e ganha
+`dt_fim_negociacao` = último pregão que temos; nada é apagado, o histórico segue valendo).
+`--dry-run` imprime tudo sem gravar. Divergências que ele só reporta (revisar à mão): BRST e
+TUPY (CNPJ do banco difere do da B3 — TUPY é só matriz×filial), TRAD/FICT (sigla do banco ≠
+código B3, ECOM/FASA — por isso o scraper de eventos dava resposta vazia pra esses) e PPLA
+(sem CNPJ no banco, B3 usa outro código, VSUI).
+
+Ativos novos (cadastro novo): a data ex dos proventos usa `tb_cotacao_bruta` (só as datas de
+pregão). Ordem: `scraper_cotacoes_b3.py --novos` → eventos corporativos → `scraper_proventos.py` →
+`fn_rebuild_tudo()`. A circularidade de antes (ajuste de dividendo gravado na cotação) acabou: o
+ajustado é derivado e recalculado pelo rebuild.
+
+## Cotações (COTAHIST)
+
+Histórico completo (1998+ na prática) vem do COTAHIST anual da B3 (`COTAHIST_A<ano>.ZIP`, cache em
+`scrape/cotahist_cache/`, o do ano corrente é rebaixado a cada execução). Só linhas `tpmerc='010'`
+(mercado à vista, sem o fracionário `…F`). `vl_fechamento` = preço bruto ÷ produto dos eventos
+corporativos POSTERIORES (`ajusta_por_split`, mesma definição de `fn_fator_acumulado`);
+`vl_fechamento_ajustado` ainda desconta os proventos (retorno total).
+
+**Validado contra o yfinance antigo (trocado em 2026-10-18)**: patrimônio de uma carteira bate no
+centavo em 3 de 4 datas testadas; a diferença (CGRA4 em 30/12/2024, +1,5%) era o yfinance
+ajustando a bonificação DUAS vezes (CMIG4 2024 também: 12,69 ÷ 1,3 = 9,76 certo, yfinance dava
+7,51 = ÷1,69). Ou seja, a série nova é a correta.
+
+**`FATCOT` e moeda**: até ~2005 muitos papéis são cotados POR LOTE de 1.000 ações (também 100, 10.000,
+100.000, 1.000.000 — campo `FATCOT`, posições 211-217): o preço unitário é o do arquivo ÷ FATCOT
+(`parse_linha` faz isso; ignorar gerava saltos ×1000/×20 em BRKM6, CEGR3...). Linhas de 1994 antes do
+Plano Real vêm em CR$ (`MODREF` ≠ `R$`) e são descartadas. Os arquivos de 1994-1997 usam códigos antigos
+de 3 letras (`ACE 3`, `PET 4`); a recodificação foi em 16/03/1998 (por isso toda série "nossa" começava
+nessa data) e o ISIN NÃO mudou nela.
+
+**`--full` apaga antes de reinserir** (por ativo): a primeira versão só sobrescrevia, e sobravam
+linhas do yfinance onde o COTAHIST não cobre (FICT3 tinha 6.560 linhas desde 2000, o COTAHIST só
+420 desde 2024). Depois de corrigir, o banco passou de 1,79M pra 1,18M cotações (603.563 linhas
+removidas, 303 ativos): 74% eram dias SEM negócio (o yfinance preenchia todo pregão com o último
+preço; o COTAHIST só tem dia com negócio — logo `tb_cotacao_bruta` NÃO tem linha pra dia sem negócio) e o
+resto, histórico de PREDECESSORA que o Yahoo emendava sob o ticker novo (TASA4 ← FJTA4 antes de
+2019, ITUB3 antes de 2009, SANB3/4 antes de 2007, CYRE3/CAMB3/CSUD3…). Nenhum dia de posição aberta de
+usuário perdeu cotação, e patrimônio/ganho/rentabilidade ficaram idênticos ao centavo. Backups:
+`bkp_cotacao.tb_cotacao_pre_full` (yfinance puro) e `tb_cotacao_pos_merge` (antes do apagar).
+Ticker renomeado só mantém histórico se estiver em `tb_ticker_historico`.
+
+**Descoberta de trocas de ticker só com o COTAHIST** (`scrape/descobre_trocas_ticker.py [--aplica]`):
+indexa todas as séries (código, ISIN) e monta, pra cada ativo, a cadeia de predecessoras. Tipos de
+ligação: `ISIN` (mesmo ISIN, outro código — certo; é a recodificação de 1998 e renomeações que mantêm o
+ISIN) e por PREÇO quando o ISIN mudou (ele carrega as 4 letras do emissor, BRFJTAACNPR2 → BRTASAACNPR4):
+série antiga termina colada (≤10 dias) no início da nova, mesma classe e fechamento contínuo —
+`PRECO-A` exige nome de pregão ou prefixo de código parecido (FORJA TAURUS ~ TAURUS ARMAS, ITAUBANCO ~
+ITAUUNIBANCO) e `PRECO-B` aceita candidato ÚNICO com gap ≤5d e razão 0,9–1,12 (TRNA11 → TAEE11, nome
+muda por completo). `PRECO-fraco` NUNCA é aplicado e para a cadeia: só por preço dá falso positivo
+(PETR4 casaria com CEMIG, ABEV3 com Vicunha Têxtil, BRKM6 com a Transbrasil). Resultado:
+TASA4 ← FJTA4 ← FJT 4 (1994+), ITUB3 ← ITAU3 ← ITA 3, PETR4 ← PET 4, VALE3 ← VAL 3...
+`tb_ticker_historico` ganhou `cd_isin` e a chave virou (`sg_ticker_antigo`, `cd_isin`): o mesmo código
+antigo pode ter ISINs diferentes (FJT 4 tem dois) e código é reaproveitado por empresas diferentes;
+`cd_isin` NULL = vale pro código todo (ligações manuais antigas). Backup antes: `bkp_cotacao.tb_cotacao_pre_chain`.
+
+**Proventos antigos em escala de lote**: a B3 informa provento anterior a ~2005 por LOTE de 1.000 ações
+(CMIG4 1998-03-16: 202,94 em base de hoje contra preço ~R$4). Com a série agora indo até 1994, aplicar
+isso no ajuste de retorno total fazia o fator explodir (10³⁵) ou ficar negativo e estourar
+`NUMERIC(20,8)` (47 ativos falharam no `--full`, o rollback manteve as linhas antigas deles). Trava em
+`ajusta_total_return`: provento ≥ 50% do preço da véspera é descartado (e o scraper imprime quantos —
+CMIG4: 29, de 1998 a 2007). Consequência: `vl_fechamento_ajustado` antes de ~2007 subestima os
+dividendos; `vl_fechamento` (só eventos) não é afetado.
+
+**Resultado da emenda (2026-10-18)**: `tb_cotacao_bruta` = 1,33M linhas, 440 ativos, de 1994-07-04 a
+2026-10-16 (TASA4 7.859 pregões desde 1994, ITUB3/PETR4/VALE3/BBAS3 desde 1994, VIVT3 desde 1998).
+Saltos "limpos" (×2, ×3, ×10…) sem evento por perto caíram de 2.495 (110 tickers) pra 187 (65 tickers,
+quase todos ilíquidos). Patrimônio/ganho/rentabilidade dos usuários idênticos ao centavo.
+**Pendência — eventos antigos que a B3 não lista**: 283 saltos PERSISTENTES (nível novo se mantém 10
+pregões, volume >0, sem evento a 7 dias) em 136 tickers, 100 deles até 2007 — BBDC4 em 2004-12 (×0,33),
+2005-11 (×0,5), 2007-03 (×0,5), ITUB4 em 1999 e 2011, etc. Os eventos de yfinance que restam (393)
+cobrem só ~2008+. Efeito: `vl_fechamento` antes do salto fica na base errada (degrau). Caminho
+previsto: inferir o fator do próprio salto (F ≈ preço da véspera ÷ preço do dia), aceitar só quando cai
+a ≤6% de um valor "redondo" (2, 3, 4, 5, 10…, 1/k) e gravar com `ds_origem='COTAHIST'` (reversível);
+bonificação pequena (10–30%) é indistinguível de oscilação normal e fica de fora.
+Download do COTAHIST ficou robusto (4 tentativas, arquivo `.part`, cache do ano corrente só vale no
+mesmo dia).
+
+**Eventos corporativos: auditoria e protótipo CVM (2026-10-18)** — `backend/tests/auditoria_eventos.sql`
+confronta cada evento com o salto do preço bruto (`vl_fechamento × fn_fator_acumulado`): dos 974 eventos
+líquidos, 426 confirmados, 37 contraditos, 11 divergentes, 196 pequenos demais (<~22%) e 304 sem preço.
+B3 erra ~6% dos conclusivos e yfinance ~17%. A API de eventos da B3 é PARCIAL (Bradesco: 10 linhas em 25
+anos, nenhuma bonificação de 2004-2021; Itaú 2011: só a perna do grupamento ×0,01, sem o desdobramento
+×100 simultâneo → preços de ITUB3/ITUB4 antes de 2011 ficaram 100× acima). A CVM TEM todos: os avisos/atas
+do IPE (`ipe_cia_aberta_<ano>.zip`, de 2003 em diante) descrevem cada evento no `Assunto` e, no PDF
+anexo (`Link_Download`, `pdftotext`), o fator e a data-base. `scrape/prototipo_eventos_cvm.py TICKER... [--pdf]`
+(SÓ LEITURA, não grava) cruza CVM × COTAHIST: fator e dia ex vêm do aviso ("a partir de 26.3.2013 as ações
+passarão a ser negociadas ex-bonificação", ou "Data-base: ... final do dia 20.5.2013" → ex = pregão
+seguinte) e o preço bruto só confirma; pernas que se anulam (grupamento 100:1 + desdobramento 1:100) =
+NEUTRO. Amostra de 12 papéis (113 episódios): reproduziu 44 eventos do banco na MESMA data, achou 6
+faltando (BBDC4: grupamento 2004, desdobramento 2004-12 ×3, bonificações 2005-11 ×2, 2007-03 ×2, 2010-07
+×1,1; ITSA4: 2025-02 ×1,05), acusou o erro do ITUB 2011 e deixou 60 episódios "sem dado". Limites: IPE só
+existe a partir de 2003 (1994-2002 fica com B3 + preço); a redação do aviso varia por empresa (recall de
+data/fator ~50% nos episódios pós-2003); fator inferido só pelo preço NÃO é confiável pra valor não
+redondo (TASA4: preço sugeriu ×0,1, o certo é 1:11 = 0,0909). Pendência: virar `scraper_eventos_cvm.py`
+(origem 'CVM'), melhorar o extrator e decidir o que fazer com os eventos de yfinance não verificáveis.
+
+**`tb_ticker_historico` (ticker antigo → ativo atual)**: pra datas ANTES de `dt_alteracao` o
+ativo é a série do ticker ANTIGO, e as linhas do ticker novo nesse período são descartadas.
+Caso real: AESB3 → AURE3 (incorporação, 2024-07-01) — as compras de 2022 foram a ~R$10,8 (preço
+do AESB3), e o AURE3 tinha série própria (~R$14,5) que negociava em paralelo; misturar as duas
+alternava os preços dia a dia. Mesma lógica vale pra CPLE6 → CPLE3 e TRPL4 → ISAE4.
+
+**Eventos que a B3 não lista**: `backend/tests/saltos_sem_evento.sql` lista saltos diários grandes
+na série já ajustada, sem evento num raio de 7 dias (rodar depois de atualizar cotações; revisar à
+mão — papel ilíquido/em recuperação e crash de mercado, como PETR4 em 09/03/2020, geram ruído).
+Pendência conhecida: antes de ~2005 o COTAHIST cota alguns papéis por lote de 1.000 ações
+(`FATCOT`, ignorado em `parse_linha`), gerando saltos ×20/×1000 em tickers antigos (BRKM6, CEGR3)
+— sem efeito na carteira atual.
+
+## Cotação real × ajustada (redesenho de 2026-10-18)
+
+`tb_cotacao` deixou de existir (backup em `bkp_cotacao.tb_cotacao_pre_bruta`). Antes ela guardava o preço
+JÁ AJUSTADO pelos eventos da época da raspagem e o real era recalculado na leitura
+(`vl_fechamento × fn_fator_acumulado`) — o contrário do certo: corrigir um evento obrigava a regerar a
+cotação do ativo, e no modo incremental um split NOVO só ajustava as linhas novas, deixando as antigas
+sem o ajuste. Agora a fonte é o real e o ajustado é derivado, no mesmo padrão das demais tabelas derivadas:
+
+- `tb_cotacao_bruta` — preço REAL do dia, como o COTAHIST informou (÷ `FATCOT`, só R$). Única que os
+  scrapers de cotação gravam (`scraper_cotacoes_b3.py`, sem nenhuma lógica de ajuste). Evento novo ou
+  corrigido não exige mexer aqui.
+- `tb_cotacao_ajustada` — derivada, recalculada do zero por `fn_popula_cotacao_ajustada()` (~15 s, chamada por
+  `fn_rebuild_tudo()`; nunca gravar na mão). Mesmas colunas que a antiga `tb_cotacao`: OHLC e `vl_fechamento`
+  ajustados por eventos (real ÷ `fn_fator_acumulado`), `vl_fechamento_ajustado` (retorno total, desconta
+  proventos) e `vl_fechamento_nominal` (o real). Provento vira fator `(P − v)/P` com P = fechamento do pregão
+  anterior ao ex já ajustado por evento e v = valor real ÷ `fn_fator_acumulado(dt_ex)`; trava de 50%
+  (provento ≥ 50% do preço = escala de lote, descartado). Soma de logaritmos em janela, provento ordenado
+  ANTES do pregão do mesmo dia (só conta pra dias estritamente anteriores ao ex).
+- Quem lê cotação ajustada usa `tb_cotacao_ajustada`; quem só precisa de data de pregão ou do real usa
+  `tb_cotacao_bruta`. O nome antigo some de propósito: leitor esquecido falha na hora em vez de ler errado.
+
+Validação da troca: nos 25 ativos regerados no dia (128.266 linhas, 1994+) a derivada bate com a tabela antiga
+em até 6e-10; nos outros 40 só o retorno total diferia, porque os proventos tinham sido reraspados depois.
+
+**Bug do fuso em `fn_popula_posicao_diaria` (achado na troca, corrigido)**: o banco roda em
+`America/Fortaleza`, que teve horário de verão nos anos 90. `generate_series(date, CURRENT_DATE, '1 day')`
+promove a `timestamptz` e uma série que COMEÇA antes de ~2000 anda 1 h fora e perde o último dia. A posição
+terminava em ontem e `fn_posicao_atual` (que filtra `MAX(dt_posicao)`) a descartava. Atingia qualquer posição
+com evento corporativo antigo legítimo: CAMB3 do jlrterceiro (780 ações) e PETR4 do mario (250) sumiam do
+patrimônio, e o evento espúrio de BBAS3 1996 escondia BBAS3/GOAU3/GOAU4 do mario e do ediesley. Corrigido com
+`generate_series(...::timestamp, ...)`. **Os números de referência antigos (patrimônio 88.845,59 do
+jlrterceiro) estavam errados por isso.** Referência certa em 2026-10-18: patrimônio jlrterceiro 95.615,99 /
+mario.eulalio 45.428,69 / ediesley 5.110,40; ganho total 115.611,80 / 24.692,09 / 2.210,02; rentabilidade
+composta 139,04% / 107,61% / 26,75% (a rentabilidade não mudou: lê a posição diária direto).
+
+## Eventos corporativos: reconstrução só com fontes oficiais (2026-10-18)
+
+Regra de ouro: o **preço bruto do COTAHIST** é o único árbitro que DESMENTE um evento. Ajuste do strike das
+opções e oscilação da B3 CONFIRMAM e DATAM, mas a ausência deles não prova nada (a B3 às vezes troca o código
+da série em vez de ajustar; EGIE3 2018, EQTL3 2019, NATU3 2019, WEGE3 2018 e PETR4 2000 são eventos reais que
+as opções não mostravam). Evento certo ⇒ série ajustada contínua na data; espúrio ⇒ a série ajustada pula por
+F; mal datado ⇒ pulo compensatório perto. Pernas que se anulam no mesmo dia (grupamento + desdobramento,
+líquido ≈ 1) NUNCA são removidas.
+
+Fontes, da mais à menos exata:
+- **S1** `tb_negocio_diario` (arquivo `TradeInformationConsolidatedFile` do `arquivos.b3.com.br`, coletor
+  `scraper_negocios_b3.py`, só de 2025-06-11 em diante — a B3 serve ~16 meses). `OscnPctg` é a oscilação contra
+  o fechamento anterior JÁ AJUSTADO (evento e provento líquido de IRRF): `F_total = (1+osc)·P_ant/P`,
+  `F_total = F_evento × F_div`, `F_div = P/(P − provento líquido)`. Dá fator e dia exatos por ticker
+  (`eventos_por_oscilacao.py`). Hoje 95 eventos; 7 dias sem arquivo são lacunas reais de publicação.
+- **S2** strike das opções (`eventos_por_opcoes.py`, de 1994): a B3 ajusta o `PREEXE` na data ex; várias séries
+  da mesma raiz mudando na mesma razão (multiplicativo, ≥4 séries, 80% consistentes) = fator do evento. Só vale
+  pra papel com opções (157 raízes). Provento em dinheiro é aditivo e o filtro descarta.
+- **S3** preço bruto: desmente (ou reposiciona, se achar o salto compensatório) evento grande (|ln F| ≥ 0,15);
+  pra evento pequeno (< 0,4) o reposicionamento por preço só vira "ambíguo".
+- **B3 API de eventos** (`scraper_eventos_corporativos_b3.py`) e **CVM** (abaixo) completam o resto.
+
+`reconstroi_eventos.py [--aplica] [--diario]` junta tudo: ADD / REPLACE / FIX_DATA / REMOVE, backup em
+`bkp_eventos.tb_evento_corporativo_pre_recon` (`..._pre_diario_<data>` no modo diário), removidos/trocados em
+`tb_evento_rejeitado` (os scrapers consultam pra não reinserir). Origens novas em `ds_origem`: `B3-OSC`,
+`B3-OPCOES`, `B3-PRECO`, `CVM`. Fonte exata (S1/S2) manda na data: evento do banco com o fator certo a 1-3 dias
+de distância é movido. Evento pequeno (< ~28%) só entra com 2ª evidência (aviso no índice IPE da CVM), senão
+vira ambíguo. Rodada de 2026-10-18: 29 removidos (ITUB3/4 2011 ×0,01, ABEV3 2013 ×5, AMER3 2024 ×0,01, VALE3
+1997, GGBR4/GOAU3/GOAU4/UNIP6/USIM5 de 1999-2000, OIBR 2013, BEES, etc. — preço bruto contínuo), 7 datas
+corrigidas (INEP4, USIM3, CEBR5, VIVR3, MWET3, LREN3, SLCE3), 1 fator trocado (OIBR4 2012 ×1,0341), 6 adições
+(BBDC4 2010-07-14 ×1,1, TOKY3, IFCM3, RVEE3, VIVR3, OIBR3). Auditoria por origem após a rodada: B3 280
+confirmados / 17 errados (~6%), yfinance 146 / 30 (~17%) — os errados do yfinance foram os removidos.
+**42 ambíguos ficam parados** (ajustes de 3% a 17%, provavelmente proventos extraordinários; KLBN 2025-12 ×1,05
+no arquivo contra bonificação ×1,01 em 12-18 no banco; DOHL4 ×1,25 e PATI3/4 ×1,31 por preço).
+
+**Carga CVM aplicada em 2026-10-18** (435 ativos, relatório em `/tmp/eventos_cvm.csv`, backup em
+`bkp_eventos.tb_evento_corporativo_pre_cvm`): 125 eventos do yfinance confirmados pelo aviso (só `ds_origem` →
+`CVM`), 8 adicionados (BBDC4 2004-03-22 ×0,0001 / 2005-11-23 ×2 / 2007-03-26 ×2, AXIA6 2007, CMIG3 2013 ×1,30765,
+CTAX3 2016 ×0,01, FRIO3 2015 ×1/3, MGEL4 2004 ×0,001) e 1 trocado (INEP4 2005-08-29 ×0,1 → ×0,0001; o preço real
+pulou ~9.773×). Os 9 foram conferidos de forma independente contra o preço real do COTAHIST (salto = 1/F). Não
+aplicados: 37 "REVISAR" (aviso e banco divergem sem prova) e 2 falhas (GFSA3 e OSXB3: `ValueError` de log de preço
+0, a corrigir). A auditoria de preço passou de 426 confirmados / 37 contraditos para 443 / 3; restam 13
+não-confirmados (SHUL4 2008, VALE3 1996, BBDC3 2004, BGIP3 1997, CTSA3 2020, DOHL4 2020, GSHP3 2019, PATI3/4 2021,
+RCSL3 2023, TASA3 2011, TELB4 2011, VIVR3 2026), todos anteriores às operações dos usuários ou em ativos que eles não
+têm: patrimônio e ganhos ficaram idênticos.
+
+**Os 13 eventos que a auditoria de preço não confirmava, resolvidos (2026-10-18)** com avisos da CVM, API de
+eventos da B3 (`GetListedSupplementCompany`, inclusive entradas que o scraper descarta) e preço real. Backup:
+`bkp_eventos.tb_evento_corporativo_pre_13`.
+- Certos como estavam (6): SHUL4 2008 ×1,24434 (aviso: 2.506.241 bonificadas sobre 10.257.144 = 1,244343, ex
+  14/04), VALE3 1996 ×0,1 (B3: grupamento 10:1; o preço pré-abr/1996 vem em escala de lote ~10× menor),
+  BGIP3 1997 ×2,5 (B3, preço de 0,0002 é só ruído), CTSA3 2020 ×2,8321 (B3 e CVM: bonificação de 183,2101627%),
+  GSHP3 2019 ×2 (B3: bonificação 100%; a queda maior no preço é a subscrição de capital) e PATI3 2021-08-04 (B3).
+- Corrigidos: BBDC3 2004-12-14 ×2 → ×3 e BBDC4 2004-12-14 ×3 (faltava): aviso do Bradesco, "desdobramento em
+  200%" = 2 novas por 1; TELB4 2011-01-24 ×0,1 → ×0,0001 (preço saltou 9.546×, TELB3 já tinha ×0,0001); TASA3
+  2011-07-07 ×1,381 → ×1,22611 e TASA4 ×1,22611 (faltava): reestruturação Polimetal, 1.000 ações viram ~1.226
+  (0,4593 × 1,9331 × 29/21), não só o desdobramento 1:29 + grupamento 21:1 (= 1,381). A bonificação de 2011-05-02
+  (×1,1) estava certa, o ×1,38095 que o parser leu nela era o evento de julho.
+- Removidos (4, em `tb_evento_rejeitado`): DOHL4 2020-05-04 e PATI4 2021-07-01 (duplicatas do yfinance mal
+  datadas; os reais são 2020-07-30 e 2021-08-04), RCSL3 2023-05-02 (a queda de 50% foi aumento de capital; o
+  grupamento real é 2023-07-10) e VIVR3 2026-02-24 ×2,0597 (B3 ajustou a referência mas não há aviso de
+  bonificação/desdobramento e o preço não agiu como tal; provável direito de subscrição; confiança média).
+**Limitação**: o modelo não tem direito de subscrição (aumento de capital com preço de emissão baixo): a queda de
+preço no ex-direito aparece como degrau que nenhum evento explica (GSHP3 2019, RCSL3 2023, VIVR3 2026).
+`reconstroi_eventos.py` agora consulta `tb_evento_rejeitado` e não reintroduz evento já rejeitado. A auditoria de
+preço ficou em 447 confirmados / 1 contradito / 6 divergentes (todos os 7 não-confirmados têm base oficial).
+
+**Carga única do passado × rotina diária (decisão do usuário)**: `scraper_eventos_cvm.py` lê avisos/atas do IPE
+da CVM (inclusive PDF/anexo) a partir do protótipo `prototipo_eventos_cvm.py` e serve SÓ pra melhorar o
+histórico; só CRIA/TROCA evento quando aviso e salto de preço concordam, confirma (`ds_origem='CVM'`) os do
+yfinance que o aviso bate, e NUNCA move a data do banco pela do texto: a data extraída do PDF erra 2-4 dias
+(BBDC4 2013: texto 28/3, opções e preço 26/3). A rotina diária (`atualiza_diario.py`) não usa PDF: cotações →
+negócios da B3 → eventos da API → `reconstroi_eventos.py --diario --aplica` (só S1, últimos 15 dias) →
+proventos → `fn_rebuild_tudo()`.
+
 ## Pipeline de recálculo
 
 Depois de importar operação nova ou rodar qualquer scraper, rodar:
@@ -172,9 +517,16 @@ Depois de importar operação nova ou rodar qualquer scraper, rodar:
 SELECT fn_rebuild_tudo();
 ```
 
-Isso chama, na ordem certa: `fn_popula_provento_ajustado` → `fn_popula_posicao_diaria` →
+Isso chama, na ordem certa: `fn_popula_provento_ajustado` → `fn_popula_cotacao_ajustada` →
+`fn_popula_posicao_diaria` →
 `fn_popula_provento_recebido` → `fn_popula_rentabilidade_ativo_diaria` →
-`fn_popula_rentabilidade_diaria`. A ordem importa (cada uma depende da anterior) — usar essa
+`fn_popula_rentabilidade_diaria`. As funções `fn_popula_*` limpam a tabela com `DELETE FROM`, **não `TRUNCATE`** (decisão de 2026-10-18): `TRUNCATE` pede
+lock exclusivo e entrava em deadlock com qualquer tela lendo a posição durante o recálculo (leitor segura a
+posição e espera a cotação, o rebuild segura a cotação e espera a posição) — abortava o rebuild disparado pelo
+upload e a carteira ficava desatualizada (achado quando o patrimônio do app não bateu com o da B3). Com `DELETE`
+o leitor vê o dado antigo, consistente, até o commit. Testado com 79 rodadas de leitura simultânea: 0 erros. A
+thread do upload (`perfil.py`) ainda tenta de novo até 3 vezes em caso de `DeadlockDetected`. O rebuild leva ~90 s.
+A ordem importa (cada uma depende da anterior) — usar essa
 função em vez de rodar as 5 manualmente. `tb_balanco_patrimonial`/`tb_valor_mercado` não
 entram nesse pipeline (não dependem de nada, são só raspagem direta).
 
@@ -191,7 +543,7 @@ uma cotação/provento do yfinance pra mesma data, se houve split depois.
 
 `fn_fator_acumulado(id_ativo, dt_referencia)` calcula o produto dos fatores de
 `tb_evento_corporativo` ocorridos DEPOIS da data — usado em dois lugares, em direções opostas:
-- **Rentabilidade diária**: preço de compra/venda (raw) é DIVIDIDO pelo fator antes de comparar com `tb_cotacao` (já ajustada).
+- **Rentabilidade diária**: preço de compra/venda (raw) é DIVIDIDO pelo fator antes de comparar com `tb_cotacao_ajustada.vl_fechamento` (já ajustada por eventos).
 - **Provento (`ds_origem='yfinance'`, hoje só FII/BDR)**: valor por ação do yfinance (já
   ajustado pra baixo) é MULTIPLICADO pelo fator pra recuperar o valor real pago na época,
   gravado em `tb_provento.vl_unitario_ajustado`. **Provento (`ds_origem='B3'`, ações)**: a B3
@@ -203,7 +555,7 @@ uma cotação/provento do yfinance pra mesma data, se houve split depois.
 yfinance também tem **eventos de split duplicados** às vezes (mesmo fator, poucos dias de
 diferença — bug deles, confirmado contra fontes oficiais várias vezes, e que volta toda vez
 que o scraper roda de novo porque a fonte continua reportando os dois). Por isso
-`scraper_eventos_corporativos.py` chama `remove_duplicados()` no final de toda execução,
+`scraper_eventos_corporativos.py` (yfinance, APAGADO em 2026-10-18; mantido aqui só como contexto dos 393 eventos antigos) chamava `remove_duplicados()` no final de toda execução,
 removendo automaticamente a data mais recente de cada par (mesmo `id_ativo`+`vl_fator`, até 14
 dias de diferença). `test_validacoes.sql` confere que não sobra nenhum par desses.
 
@@ -231,9 +583,18 @@ de proventos) — `classe_do_isin()`. UNIT não tem esse padrão de ISIN (usa "C
 + classe) — cai num fallback simples (atribui ao ativo classe UNIT do emissor, se existir).
 Eventos simultâneos do mesmo tipo na mesma data pro mesmo ativo (confirmado em BBAS3 1996: 3
 bonificações de 20%/30%/50% no mesmo dia) são agregados por PRODUTO dos multiplicadores antes
-de gravar, não um sobrescrevendo o outro — efeito cumulativo correto.
+de gravar, não um sobrescrevendo o outro — efeito cumulativo correto. **Mas só dentro do MESMO
+ISIN**: a B3 repete o mesmo evento uma vez por ISIN da classe (BBAS3 tem 3 ISINs de ON, COCE5 2
+de PN), e multiplicar entre ISINs elevava o fator à potência do nº de ISINs (BBAS3 2024:
+bonificação 2,0 virava 8,0; grupamento 0,001 virava 1e-9 → `round(,6)` = 0 → cotação `NaN` e
+rentabilidade absurda, BBAS3 chegou a +14.663%). Entre ISINs da mesma classe usa-se o valor de
+um só. Desdobramento+grupamento no mesmo dia são eventos de TIPO diferente (VIVT3 2025: ×80 e
+×0,025 = 2,0 líquido, bate com o salto real do COTAHIST) e a limpeza é em duas fases (apaga os
+eventos B3 antigos do ativo + yfinance a até 14 dias de um evento B3, e só depois grava) pra um
+evento B3 nunca apagar o irmão recém-gravado. O mesmo evento listado sob ISINs com
+`lastDatePrior` diferentes (HOOT4/FESA4/EUCA3 1987-89) fica só com a data mais antiga.
 
-Eventos anteriores ao início da nossa `tb_cotacao` (raspagem não cobre essa época) usam
+Eventos anteriores ao início da nossa `tb_cotacao_bruta` (raspagem não cobre essa época) usam
 fallback de `+1 dia corrido` em vez de tentar achar o próximo pregão (que acharia um pregão
 real, mas anos depois da data certa, se não tiver cotação por perto) — impreciso, mas não
 absurdo, e sem efeito prático já que não há nada no sistema pra comparar contra essa época
@@ -317,7 +678,7 @@ direção de leitura do número.
 Mesma migração da DRE, mesmo motivo: troca de yfinance pra dados abertos da CVM
 (`dados.cvm.gov.br`), pipeline em duas etapas (`scraper_balanco_patrimonial.py` cru →
 `tb_balanco_conta`, `popula_balanco.py` curadoria local sem rede → `tb_balanco_patrimonial`).
-`tb_balanco_patrimonial_old_yfinance` fica como histórico, não recebe mais atualização.
+(A antiga `tb_balanco_patrimonial_old_yfinance` e o scraper dela foram apagados em 2026-10-18.)
 
 A CVM publica ativo (`BPA`) e passivo (`BPP`) em arquivos separados (diferente da DRE, que é
 um arquivo só) — `scraper_balanco_patrimonial.py` junta os dois pelo mesmo
@@ -535,8 +896,7 @@ imobilizado/intangível) — quem precisar de capex de uma empresa específica c
 Fonte trocada de yfinance pra dados abertos da CVM (`dados.cvm.gov.br`) depois de achar que
 `vl_resultado_financeiro` vindo do `Net Interest Income` do yfinance estava sistematicamente
 errado (sinal E magnitude, confirmado contra o ITR oficial da Even em 3 trimestres
-diferentes). `tb_dre_old_yfinance` fica como histórico, não recebe mais atualização;
-`scraper_dre_old_yfinance.py` não roda mais.
+diferentes). A antiga `tb_dre_old_yfinance` e o scraper dela foram apagados em 2026-10-18.
 
 Pipeline em duas etapas, de propósito separadas (raspar a CVM é lento — baixar+parsear ~16
 anos de ITR pra todo o mercado; casar conta-por-texto é rápido — só leitura local; separar
@@ -804,7 +1164,7 @@ todos os eventos de `GetListedCashDividends` UMA vez por emissor, e distribui pr
 confirmado que o valor por ação É o mesmo entre classes pra um mesmo evento (Lei das S.A.
 exige isso), `typeStock` só existe pra permitir que cada classe tenha sua própria
 `closingPricePriorExDate` (preço de fechamento anterior ao ex, que varia por classe).
-`DELETE`+reinsere por `id_ativo` a cada execução (substitui tudo, igual `scraper_cotacoes.py`)
+`DELETE`+reinsere por `id_ativo` a cada execução (substitui tudo, como o antigo scraper de cotações yfinance)
 — sem tabela `_old_yfinance` preservada (diferente da migração de DRE/balanço/DFC): mesmo
 papel semântico, só fonte melhor, sem mudança de formato que justifique manter as duas.
 
@@ -814,7 +1174,7 @@ papel semântico, só fonte melhor, sem mudança de formato que justifique mante
 **`dt_ex` não vem direto da API** — a B3 só devolve `lastDatePriorEx` ("última data anterior
 ao ex", a data de fechamento usada como referência, não a própria data ex). `dt_ex` real é
 inferido como o próximo dia de pregão depois de `lastDatePriorEx`, consultando
-`tb_cotacao` (`MIN(dt_cotacao) WHERE dt_cotacao > lastDatePriorEx`) em vez de simplesmente
+`tb_cotacao_bruta` (`MIN(dt_cotacao) WHERE dt_cotacao > lastDatePriorEx`) em vez de simplesmente
 `+1 dia corrido` — pega o próximo dia de pregão de verdade mesmo quando `lastDatePriorEx` cai
 numa sexta (ex-data cairia na segunda, não no sábado). Confirmado contra o dado antigo do
 yfinance pra BBAS3/PETR4 (mesmas datas exatas).
@@ -875,11 +1235,11 @@ subestimaria o yield de qualquer ação que fez desdobramento no período.
 
 ## Fontes de dados externas
 
-- dadosdemercado.com.br — scraping HTML (sem API), lista de tickers e detalhe de emissor
+- dadosdemercado.com.br — NÃO é mais usado (substituído pelo cadastro B3).
 - B3 (`sistemaswebb3-listados.b3.com.br`) — API JSON não documentada publicamente, usada pelo
   próprio site institucional da B3; proventos (dividendos/JCP/rendimento), ver seção própria.
   Não tem o bloqueio anti-bot agressivo do Yahoo Finance.
-- yfinance — cotações, splits/grupamentos, balanço patrimonial, valor de mercado (DRE saiu de
+- yfinance — (saindo, ver "Direção do projeto") cotações antigas, splits/grupamentos, balanço patrimonial, valor de mercado (DRE saiu de
   yfinance, ver seção própria; proventos também saiu, ver seção própria). Sujeito a bloqueio
   por IP da Yahoo depois de raspagens pesadas — quando bloqueado, manifesta como timeout puro
   de conexão (sem resposta HTTP, nem 429/403) na maioria das tentativas, não como erro de
