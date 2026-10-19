@@ -114,10 +114,11 @@ def main():
         rejeitados[tk_].append((dd_, float(ff_)))
 
     # ---------------- S2 (opcoes)
-    cand = le_csv('/tmp/eventos_opcoes.csv')
-    _, ev2 = classifica_candidatos(conn, cand)
-    if diario:
+    if diario:       # rotina diaria: so o arquivo diario (S1); nao depende do CSV de opcoes (gerado a mao em /tmp)
         ev2 = []
+    else:
+        cand = le_csv('/tmp/eventos_opcoes.csv')       # gerado por eventos_por_opcoes.py
+        _, ev2 = classifica_candidatos(conn, cand)
     s2 = defaultdict(list)
     for raiz, d, R, _tk in ev2:
         if d >= INICIO_S1:
