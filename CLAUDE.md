@@ -529,6 +529,19 @@ yfinance que o aviso bate, e NUNCA move a data do banco pela do texto: a data ex
 negócios da B3 → eventos da API → `reconstroi_eventos.py --diario --aplica` (só S1, últimos 15 dias) →
 proventos → `fn_rebuild_tudo()`.
 
+## Orquestração (Airflow, `orquestracao/`)
+
+Airflow 3.3.2 (estável mais recente em 2026-10-19) via Docker Compose, **dentro do mesmo repositório** (as DAGs chamam os
+scripts de `scrape/` e leem o `.env` da raiz; o projeto inteiro é montado em `/opt/projeto`; dá pra separar depois). LocalExecutor
+(uma máquina: sem Redis/Celery), `network_mode: host` (o Postgres da carteira é `localhost:5432` e os scripts usam
+`PGHOST=localhost`), metadados do Airflow em outro Postgres (container, porta 5433), UI/API em `http://localhost:8080`.
+`orquestracao/.env` (segredos, gerado, fora do git; `.env.example` mostra as chaves) e `Dockerfile` (poppler-utils pro `pdftotext`
++ `requirements.txt` dos scripts). Subir: `cd orquestracao && docker compose up -d --build`; login `admin` + `AIRFLOW_ADMIN_PASSWORD`
+do `.env`. DAGs (nascem PAUSADAS, ligar na UI): `atualiza_diario` (dias úteis 20h, uma tarefa por etapa, retry 2× a cada 10 min,
+termina em `scrape/rebuild_tudo.py`; o `scrape/atualiza_diario.py` segue existindo como CLI manual) e `cotacao_intradia`
+(`*/5 10-18 * * 1-5`, substitui o `scraper_cotacao_intradia.py --loop`). Pendente: alerta de falha (e-mail/Telegram), checagem
+de "COTAHIST do dia chegou" e feriados.
+
 ## Pipeline de recálculo
 
 Depois de importar operação nova ou rodar qualquer scraper, rodar:

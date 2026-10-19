@@ -1,0 +1,7 @@
+# dependencias dos scripts de scrape/ (o psycopg2 ja vem no Airflow)
+psycopg2-binary
+requests
+openpyxl
+pandas
+pdfplumber
+yfinance
