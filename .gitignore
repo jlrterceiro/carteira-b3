@@ -8,6 +8,8 @@ relatorio_*.xlsx
 
 # cache de raspagem (regeneravel, pesado -- nao faz sentido versionar)
 scrape/cvm_cache/
+scrape/cotahist_cache/
+scrape/insider_cache/
 
 # python
 __pycache__/
@@ -16,3 +18,4 @@ __pycache__/
 # ferramentas locais
 .claude/
 .playwright-mcp/
+.mcp.json

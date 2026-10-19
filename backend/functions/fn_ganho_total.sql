@@ -53,7 +53,7 @@ AS $$
     ),
     cotacao_atual AS (
         SELECT DISTINCT ON (id_ativo) id_ativo, vl_fechamento AS vl_preco_atual
-        FROM public.tb_cotacao
+        FROM public.tb_cotacao_ajustada
         ORDER BY id_ativo, dt_cotacao DESC
     ),
     nao_realizado AS (

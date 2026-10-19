@@ -127,7 +127,7 @@ def proxima_data_pregao(conn, id_ativo, dt_referencia):
     with conn.cursor() as cur:
         cur.execute(
             '''
-            SELECT MIN(dt_cotacao) FROM public.tb_cotacao
+            SELECT MIN(dt_cotacao) FROM public.tb_cotacao_bruta
             WHERE id_ativo = %s AND dt_cotacao > %s
             ''',
             (id_ativo, dt_referencia),

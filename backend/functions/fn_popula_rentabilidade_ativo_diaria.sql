@@ -25,7 +25,7 @@
 -- So gera linha para dias em que houve cotacao do ativo (pregao) e exposicao > 0
 -- (posicao no inicio do dia ou compra no dia).
 --
--- IMPORTANTE: tb_cotacao vem do yfinance ja ajustada retroativamente pra qualquer
+-- IMPORTANTE: tb_cotacao_ajustada vem do yfinance ja ajustada retroativamente pra qualquer
 -- split/grupamento futuro em relacao aquela data (e assim que o yfinance devolve
 -- historico, pra manter o grafico continuo). Ja o preco de compra/venda em
 -- tb_operacao e o preco nominal pago na epoca, sem esse ajuste. Por isso o preco
@@ -38,7 +38,7 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    TRUNCATE TABLE public.tb_rentabilidade_ativo_diaria;
+    DELETE FROM public.tb_rentabilidade_ativo_diaria;
 
     INSERT INTO public.tb_rentabilidade_ativo_diaria (dt_dia, id_carteira, id_corretora, id_ativo, vl_base, vl_ganho)
     WITH grupos AS (
@@ -53,7 +53,7 @@ BEGIN
             vl_abertura,
             vl_fechamento,
             LAG(vl_fechamento) OVER (PARTITION BY id_ativo ORDER BY dt_cotacao) AS vl_fechamento_anterior
-        FROM public.tb_cotacao
+        FROM public.tb_cotacao_ajustada
     ),
     compras AS (
         SELECT

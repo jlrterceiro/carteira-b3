@@ -1,6 +1,6 @@
 -- Produto de todos os vl_fator de tb_evento_corporativo de um ativo, ocorridos
 -- DEPOIS de p_dt_referencia. Usado pra trazer um preco nominal (pago numa data
--- passada, sem ajuste) para a mesma base de splits/grupamentos que o tb_cotacao
+-- passada, sem ajuste) para a mesma base de splits/grupamentos que o tb_cotacao_ajustada
 -- ja vem ajustado do yfinance (que reescreve o historico de preco pra refletir a
 -- estrutura de acoes atual, incluindo splits/grupamentos que ainda nao tinham
 -- ocorrido naquela data).

@@ -12,7 +12,7 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    TRUNCATE TABLE public.tb_rentabilidade_diaria;
+    DELETE FROM public.tb_rentabilidade_diaria;
 
     INSERT INTO public.tb_rentabilidade_diaria (
         dt_dia, id_usuario, id_carteira, id_corretora, vl_base, vl_ganho, rentabilidade_pct

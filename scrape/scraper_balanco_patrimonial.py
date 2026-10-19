@@ -9,6 +9,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from db_lib import get_conn
+from cnpj_emissor import fetch_emissores_cnpj, periodo_valido
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cvm_cache')
 ANO_INICIAL = 2011
@@ -18,20 +19,7 @@ FATOR_ESCALA = {'MIL': 1000, 'MILHAO': 1_000_000, 'UNIDADE': 1}
 
 
 def fetch_emissores(conn, ticker_filter=None):
-    query = '''
-        SELECT DISTINCT e.id_emissor, e.nr_cnpj
-        FROM public.tb_emissor e
-        JOIN public.tb_ativo a ON a.id_emissor = e.id_emissor
-        JOIN public.tb_tipo_ativo ta ON ta.id_tipo_ativo = a.id_tipo_ativo
-        WHERE ta.sg_tipo_ativo = 'ACAO' AND e.nr_cnpj IS NOT NULL
-    '''
-    params = ()
-    if ticker_filter:
-        query += ' AND a.sg_ticker = %s'
-        params = (ticker_filter,)
-    with conn.cursor() as cur:
-        cur.execute(query, params)
-        return cur.fetchall()
+    return fetch_emissores_cnpj(conn, ticker_filter)
 
 
 def fetch_ativos_do_emissor(conn, id_emissor):
@@ -143,11 +131,11 @@ def upsert_balanco_conta(conn, id_ativo, dt_referencia, tp_periodo, contas):
     conn.commit()
 
 
-def process_emissor(conn, id_emissor, cnpj):
+def process_emissor(conn, id_emissor, cnpj, dt_min=None, dt_max=None):
     ids_ativo = fetch_ativos_do_emissor(conn, id_emissor)
     if not ids_ativo:
         return
-    periodos = fetch_periodos_cvm(cnpj)
+    periodos = [p for p in fetch_periodos_cvm(cnpj) if periodo_valido(p[1], dt_min, dt_max)]
     if not periodos:
         print(f'  {cnpj}: nenhum balanco encontrado')
         return
@@ -162,9 +150,9 @@ def run(ticker_filter=None):
     emissores = fetch_emissores(conn, ticker_filter)
     total = len(emissores)
     print(f'processing {total} emissores')
-    for index, (id_emissor, cnpj) in enumerate(emissores, start=1):
+    for index, (id_emissor, cnpj, dt_min, dt_max) in enumerate(emissores, start=1):
         print(f'[{index}/{total}] {cnpj}')
-        process_emissor(conn, id_emissor, cnpj)
+        process_emissor(conn, id_emissor, cnpj, dt_min, dt_max)
     conn.close()
 
 

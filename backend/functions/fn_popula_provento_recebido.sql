@@ -36,7 +36,7 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    TRUNCATE TABLE public.tb_provento_recebido;
+    DELETE FROM public.tb_provento_recebido;
 
     WITH base AS (
         SELECT

@@ -1,4 +1,4 @@
--- Posicao atual por ativo (soma todas as carteiras/corretoras), usando tb_posicao_diaria,
+-- Posicao atual por ativo (soma as corretoras do usuario; p_id_corretora filtra uma so), usando tb_posicao_diaria,
 -- que ja considera splits/agrupamentos/bonificacoes via tb_evento_corporativo.
 -- Substitui query_posicao_atual.sql -- agora com usuario como parametro em vez de
 -- fixo no codigo.
@@ -9,7 +9,9 @@
 -- linha e a posicao "desaparece" mesmo a carteira estando intacta. MAX(dt_posicao) sempre
 -- aponta pra ultima posicao calculada, seja ela de hoje ou de alguns dias atras.
 
-CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL)
+-- troca de assinatura (ganhou p_id_corretora): sem o DROP ficariam duas versoes e a chamada de 1 argumento viraria ambigua
+DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT);
+CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL, p_id_corretora INTEGER DEFAULT NULL)
 RETURNS TABLE (
     sg_ticker TEXT,
     nm_ativo TEXT,
@@ -33,6 +35,7 @@ AS $$
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
         WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)
+          AND (p_id_corretora IS NULL OR p.id_corretora = p_id_corretora)
         GROUP BY p.id_ativo
         HAVING SUM(p.qt_ativo) > 0
     ),
@@ -41,7 +44,7 @@ AS $$
             id_ativo,
             vl_fechamento AS vl_preco_atual,
             dt_cotacao
-        FROM public.tb_cotacao
+        FROM public.tb_cotacao_ajustada
         ORDER BY id_ativo, dt_cotacao DESC
     )
     SELECT

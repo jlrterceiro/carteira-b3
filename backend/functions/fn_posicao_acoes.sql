@@ -39,7 +39,7 @@ AS $$
             id_ativo,
             vl_fechamento AS vl_preco_atual,
             dt_cotacao
-        FROM public.tb_cotacao
+        FROM public.tb_cotacao_ajustada
         ORDER BY id_ativo, dt_cotacao DESC
     )
     SELECT

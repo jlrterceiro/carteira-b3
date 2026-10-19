@@ -22,7 +22,9 @@ DECLARE
     v_preco_medio NUMERIC;
     v_dt_inicio DATE;
 BEGIN
-    TRUNCATE TABLE public.tb_posicao_diaria;
+    -- DELETE (e nao TRUNCATE) de proposito: TRUNCATE exige lock exclusivo e entrava em deadlock com leitores
+    -- (telas lendo a posicao durante o recalculo); DELETE deixa o leitor ver o dado antigo ate o commit.
+    DELETE FROM public.tb_posicao_diaria;
 
     CREATE TEMP TABLE tmp_posicao_evento (
         seq SERIAL,
@@ -129,7 +131,12 @@ BEGIN
     SELECT d.dia, g.id_carteira, g.id_corretora, g.id_ativo, s.qt_ativo, s.vl_preco_medio
     FROM (SELECT DISTINCT id_carteira, id_corretora, id_ativo, MIN(dt_evento) OVER (PARTITION BY id_carteira, id_corretora, id_ativo) AS dt_inicio
           FROM tmp_posicao_evento) g
-    CROSS JOIN LATERAL generate_series(g.dt_inicio, CURRENT_DATE, INTERVAL '1 day') AS d(dia)
+    -- timestamp SEM fuso de proposito: com date o generate_series promove a timestamptz e, no fuso do banco
+    -- (America/Fortaleza teve horario de verao nos anos 90), uma serie que comeca antes de ~2000 anda 1h fora
+    -- e perde o ultimo dia -- a posicao some de fn_posicao_atual (que olha MAX(dt_posicao)).
+    CROSS JOIN LATERAL (
+        SELECT x::date AS dia FROM generate_series(g.dt_inicio::timestamp, CURRENT_DATE::timestamp, INTERVAL '1 day') AS x
+    ) AS d
     JOIN LATERAL (
         SELECT qt_ativo, vl_preco_medio
         FROM tmp_posicao_evento e

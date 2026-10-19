@@ -118,7 +118,7 @@ def proxima_data_pregao(conn, id_ativo, dt_referencia):
 
     with conn.cursor() as cur:
         cur.execute(
-            'SELECT MIN(dt_cotacao) FROM public.tb_cotacao WHERE id_ativo = %s AND dt_cotacao > %s',
+            'SELECT MIN(dt_cotacao) FROM public.tb_cotacao_bruta WHERE id_ativo = %s AND dt_cotacao > %s',
             (id_ativo, dt_referencia),
         )
         row = cur.fetchone()
@@ -132,6 +132,46 @@ def proxima_data_pregao(conn, id_ativo, dt_referencia):
     return fallback
 
 
+def existe_evento_exato(conn, id_ativo, dt_evento):
+    # fontes exatas (oscilacao oficial da B3 / ajuste de strike das opcoes) tem prioridade sobre a API de
+    # eventos, que e parcial e as vezes erra o fator (CASH3 2023: x0,01 onde o certo e x0,1)
+    with conn.cursor() as cur:
+        cur.execute(
+            '''
+            SELECT 1 FROM public.tb_evento_corporativo
+            WHERE id_ativo = %s AND ds_origem IN ('B3-OPCOES', 'B3-OSC')
+              AND dt_evento BETWEEN %s - %s AND %s + %s LIMIT 1
+            ''',
+            (id_ativo, dt_evento, TOLERANCIA_DIAS, dt_evento, TOLERANCIA_DIAS),
+        )
+        return cur.fetchone() is not None
+
+
+def foi_rejeitado(conn, id_ativo, dt_evento, fator):
+    with conn.cursor() as cur:
+        cur.execute(
+            '''
+            SELECT 1 FROM public.tb_evento_rejeitado
+            WHERE id_ativo = %s AND dt_evento BETWEEN %s - 3 AND %s + 3
+              AND abs(ln(vl_fator / %s::numeric)) < 0.02 LIMIT 1
+            ''',
+            (id_ativo, dt_evento, dt_evento, fator),
+        )
+        return cur.fetchone() is not None
+
+
+def remove_eventos_b3(conn, id_ativo):
+    with conn.cursor() as cur:
+        cur.execute(
+            '''
+            DELETE FROM public.tb_evento_corporativo
+            WHERE id_ativo = %s AND ds_origem = 'B3'
+              AND id_tipo_operacao IN (SELECT id_tipo_operacao FROM tb_tipo_operacao WHERE sg_tipo_operacao IN ('SPLIT','GRUP','BONIF'))
+            ''',
+            (id_ativo,),
+        )
+
+
 def remove_eventos_proximos(conn, id_ativo, dt_evento):
     with conn.cursor() as cur:
         cur.execute(
@@ -139,6 +179,7 @@ def remove_eventos_proximos(conn, id_ativo, dt_evento):
             DELETE FROM public.tb_evento_corporativo
             WHERE id_ativo = %s
               AND id_tipo_operacao IN (SELECT id_tipo_operacao FROM tb_tipo_operacao WHERE sg_tipo_operacao IN ('SPLIT','GRUP','BONIF'))
+              AND COALESCE(ds_origem, 'yfinance') NOT IN ('B3', 'B3-OPCOES', 'B3-OSC')
               AND dt_evento BETWEEN %s - %s AND %s + %s
             ''',
             (id_ativo, dt_evento, TOLERANCIA_DIAS, dt_evento, TOLERANCIA_DIAS),
@@ -172,11 +213,13 @@ def process_emissor(conn, id_emissor, sg_emissor, tipo_ids):
     for id_ativo, ticker, sg_classe in ativos:
         ativos_por_classe.setdefault(sg_classe, []).append((id_ativo, ticker))
 
-    # agrupa por (classe, label, lastDatePrior) multiplicando os fatores -- alguns emissores
-    # tem mais de um evento do mesmo tipo na mesma data pra o mesmo ISIN (ex: BBAS3 1996, 3
-    # bonificacoes simultaneas de 20%/30%/50%); o efeito cumulativo correto e o PRODUTO dos
-    # multiplicadores, nao um substituindo o outro.
-    agregados = {}
+    # Dentro do MESMO ISIN, eventos do mesmo tipo/data sao eventos distintos simultaneos (ex:
+    # BBAS3 1996, 3 bonificacoes de 20%/30%/50%) -- efeito cumulativo = PRODUTO. Mas a B3
+    # repete o mesmo evento uma vez por ISIN da classe (BBAS3 tem 3 ISINs de ON, COCE 2 de PN),
+    # entao entre ISINs diferentes da mesma classe NAO se multiplica: usa o de um deles
+    # (multiplicar elevava o fator a potencia do numero de ISINs, ex: bonificacao 2.0 virava
+    # 8.0, grupamento 0.001 virava 1e-9 -> 0 apos o round).
+    por_isin = {}
     for ev in eventos:
         label = ev['label']
         tipo_sigla = TIPO_POR_LABEL.get(label)
@@ -196,17 +239,44 @@ def process_emissor(conn, id_emissor, sg_emissor, tipo_ids):
             destinos = ativos_por_classe.get(classe, [])
 
         for id_ativo, ticker in destinos:
-            chave = (id_ativo, tipo_sigla, dt_referencia)
-            if chave in agregados:
-                agregados[chave] *= multiplicador
-            else:
-                agregados[chave] = multiplicador
+            chave = (id_ativo, tipo_sigla, dt_referencia, isin)
+            por_isin[chave] = por_isin.get(chave, 1.0) * multiplicador
 
+    agregados = {}
+    for (id_ativo, tipo_sigla, dt_referencia, isin), fator in por_isin.items():
+        chave = (id_ativo, tipo_sigla, dt_referencia)
+        if chave not in agregados:
+            agregados[chave] = fator
+        elif abs(agregados[chave] - fator) > 1e-9 * max(abs(fator), 1.0):
+            print(f'  aviso: {sg_emissor} {tipo_sigla} {dt_referencia}: ISINs da mesma classe divergem ({agregados[chave]} vs {fator}), mantendo o primeiro')
+
+    # Duas fases: primeiro limpa (eventos B3 antigos do ativo + eventos yfinance proximos de
+    # algum evento B3), depois grava tudo. Limpar e gravar evento a evento fazia um evento B3
+    # apagar o irmao recem-gravado (ex: desdobramento+grupamento no mesmo dia, VIVT3/LEVE3, ou
+    # bonificacao e grupamento a 5 dias, SANB3).
+    novos = []
     for (id_ativo, tipo_sigla, dt_referencia), fator in agregados.items():
-        dt_evento = proxima_data_pregao(conn, id_ativo, dt_referencia)
+        novos.append((id_ativo, tipo_sigla, proxima_data_pregao(conn, id_ativo, dt_referencia), round(fator, 12)))
+
+    # mesma regra do remove_duplicados (yfinance): mesmo ativo+tipo+fator a ate 14 dias de
+    # distancia e o mesmo evento listado sob ISINs com lastDatePrior diferentes -- fica o mais antigo.
+    novos.sort(key=lambda n: (n[0], n[1], n[3], n[2]))
+    unicos = []
+    for n in novos:
+        if unicos and unicos[-1][:2] == n[:2] and unicos[-1][3] == n[3] and (n[2] - unicos[-1][2]).days <= TOLERANCIA_DIAS:
+            continue
+        unicos.append(n)
+    novos = unicos
+
+    for id_ativo in {n[0] for n in novos}:
+        remove_eventos_b3(conn, id_ativo)
+    for id_ativo, tipo_sigla, dt_evento, fator in novos:
         remove_eventos_proximos(conn, id_ativo, dt_evento)
-        upsert_evento(conn, id_ativo, tipo_ids[tipo_sigla], dt_evento, round(fator, 6))
-        print(f'  {sg_emissor}: {tipo_sigla} em {dt_evento} (fator {round(fator, 6)})')
+    for id_ativo, tipo_sigla, dt_evento, fator in novos:
+        if existe_evento_exato(conn, id_ativo, dt_evento) or foi_rejeitado(conn, id_ativo, dt_evento, fator):
+            continue
+        upsert_evento(conn, id_ativo, tipo_ids[tipo_sigla], dt_evento, fator)
+        print(f'  {sg_emissor}: {tipo_sigla} em {dt_evento} (fator {fator})')
 
 
 def run(ticker_filter=None):
@@ -220,6 +290,7 @@ def run(ticker_filter=None):
         try:
             process_emissor(conn, id_emissor, sg_emissor, tipo_ids)
         except Exception as e:
+            conn.rollback()
             print(f'  erro: {e}')
         time.sleep(0.3)
     conn.close()
