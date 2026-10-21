@@ -2,18 +2,21 @@
 import Ganhos from "./Ganhos";
 import Posicao from "./Posicao";
 import Rentabilidade from "./Rentabilidade";
-import { useCorretora } from "../lib/sessao";
+import { useCorretora, useDataRef } from "../lib/sessao";
 
-// key = corretora: trocar o filtro remonta a tela e refaz as buscas do zero
+// key = corretora + data: trocar o filtro remonta a tela e refaz as buscas do zero
 export function PosicaoTela() {
   const c = useCorretora();
-  return <Posicao key={c ?? "todas"} idCorretora={c} />;
+  const d = useDataRef();
+  return <Posicao key={`${c ?? "todas"}|${d ?? "hoje"}`} idCorretora={c} dataRef={d} />;
 }
 export function GanhosTela() {
   const c = useCorretora();
-  return <Ganhos key={c ?? "todas"} idCorretora={c} />;
+  const d = useDataRef();
+  return <Ganhos key={`${c ?? "todas"}|${d ?? "hoje"}`} idCorretora={c} dataRef={d} />;
 }
 export function RentabilidadeTela() {
   const c = useCorretora();
-  return <Rentabilidade key={c ?? "todas"} idCorretora={c} />;
+  const d = useDataRef();
+  return <Rentabilidade key={`${c ?? "todas"}|${d ?? "hoje"}`} idCorretora={c} dataRef={d} />;
 }

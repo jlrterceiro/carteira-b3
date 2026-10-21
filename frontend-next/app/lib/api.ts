@@ -63,9 +63,10 @@ export const PERIODOS: Record<string, number | null> = {
   Total: null,
 };
 
-export function periodoParams(dias: number | null) {
-  const hoje = new Date();
+// `ref` (yyyy-mm-dd): a janela termina nessa data (snapshot) em vez de hoje
+export function periodoParams(dias: number | null, ref?: string | null) {
+  const fim = ref ? new Date(`${ref}T12:00:00`) : new Date();
   const inicio =
-    dias == null ? undefined : isoDate(new Date(hoje.getTime() - dias * 864e5));
-  return { inicio, fim: isoDate(hoje) };
+    dias == null ? undefined : isoDate(new Date(fim.getTime() - dias * 864e5));
+  return { inicio, fim: isoDate(fim) };
 }

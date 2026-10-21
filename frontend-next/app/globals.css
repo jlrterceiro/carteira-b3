@@ -72,6 +72,8 @@ th.sortable:hover { color: var(--fg); }
 .main { min-width: 0; }
 .topbar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding: 16px 24px 0; }
 .filtro-corretora { display: flex; align-items: center; gap: 8px; }
+.snapshot-aviso { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--card); font-size: 13px; }
+.snapshot-aviso button { margin-left: 6px; padding: 2px 10px; }
 .content { padding: 16px 24px 24px; }
 .chips.right { justify-content: flex-end; }
 @media (max-width: 700px) {

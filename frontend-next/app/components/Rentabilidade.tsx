@@ -76,19 +76,19 @@ const METODOS: { id: Metodo; rotulo: string; descricao: string }[] = [
 ];
 
 // TWR (receber | status_invest): grafico e total seguem o periodo; a matriz usa o historico inteiro.
-function TwrView({ metodo, periodo, corr }: { metodo: Metodo; periodo: string; corr: string | undefined }) {
+function TwrView({ metodo, periodo, corr, dataRef }: { metodo: Metodo; periodo: string; corr: string | undefined; dataRef: string | null }) {
   const [res, setRes] = useState<{ key: string; dados?: Resp; erro?: string } | null>(null);
   useEffect(() => {
-    api<Resp>("/carteira/rentabilidade", { params: { ...periodoParams(PERIODOS[periodo]), id_corretora: corr, metodo } })
+    api<Resp>("/carteira/rentabilidade", { params: { ...periodoParams(PERIODOS[periodo], dataRef), id_corretora: corr, metodo } })
       .then((dados) => setRes({ key: periodo, dados }))
       .catch((e) => setRes({ key: periodo, erro: e.message }));
-  }, [periodo, corr, metodo]);
+  }, [periodo, corr, metodo, dataRef]);
 
   // a matriz mensal sempre usa o historico inteiro: so faz sentido com meses completos, entao nao segue o filtro
   const [completo, setCompleto] = useState<Resp | null>(null);
   useEffect(() => {
-    api<Resp>("/carteira/rentabilidade", { params: { id_corretora: corr, metodo } }).then(setCompleto).catch(() => setCompleto(null));
-  }, [corr, metodo]);
+    api<Resp>("/carteira/rentabilidade", { params: { id_corretora: corr, metodo, fim: dataRef ?? undefined } }).then(setCompleto).catch(() => setCompleto(null));
+  }, [corr, metodo, dataRef]);
 
   const atual = res?.key === periodo ? res : null;
   const dados = atual?.dados ?? null;
@@ -162,7 +162,7 @@ function TwrView({ metodo, periodo, corr }: { metodo: Metodo; periodo: string; c
   );
 }
 
-export default function Rentabilidade({ idCorretora }: { idCorretora: number | null }) {
+export default function Rentabilidade({ idCorretora, dataRef }: { idCorretora: number | null; dataRef: string | null }) {
   const corr = idCorretora == null ? undefined : String(idCorretora);
   const [periodo, setPeriodo] = useState("Total");
   const [metodo, setMetodo] = useState<Metodo>(() => {
@@ -194,7 +194,7 @@ export default function Rentabilidade({ idCorretora }: { idCorretora: number | n
         </div>
       </div>
       <p className="muted rent-descricao">{atual.descricao}</p>
-      <TwrView key={metodo} metodo={metodo} periodo={periodo} corr={corr} />
+      <TwrView key={metodo} metodo={metodo} periodo={periodo} corr={corr} dataRef={dataRef} />
     </>
   );
 }

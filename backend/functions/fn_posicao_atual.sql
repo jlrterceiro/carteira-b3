@@ -12,7 +12,10 @@
 -- troca de assinatura (ganhou p_id_corretora): sem o DROP ficariam duas versoes e a chamada de 1 argumento viraria ambigua
 DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT);
 DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT, INTEGER);
-CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL, p_id_corretora INTEGER DEFAULT NULL)
+DROP FUNCTION IF EXISTS public.fn_posicao_atual(TEXT, INTEGER, DATE);
+-- p_dt_ref: visao de snapshot (a carteira e os precos como estavam naquela data; NULL = agora). Quantidade e preco medio vem de
+-- tb_posicao_diaria no ultimo dia <= p_dt_ref e o preco de fn_cotacao_em(p_dt_ref).
+CREATE OR REPLACE FUNCTION public.fn_posicao_atual(p_sg_usuario TEXT DEFAULT NULL, p_id_corretora INTEGER DEFAULT NULL, p_dt_ref DATE DEFAULT NULL)
 RETURNS TABLE (
     sg_ticker TEXT,
     nm_ativo TEXT,
@@ -39,7 +42,7 @@ AS $$
         FROM public.tb_posicao_diaria p
         JOIN public.tb_carteira c ON c.id_carteira = p.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
-        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
+        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria WHERE p_dt_ref IS NULL OR dt_posicao <= p_dt_ref)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)
           AND (p_id_corretora IS NULL OR p.id_corretora = p_id_corretora)
         GROUP BY p.id_ativo
@@ -62,6 +65,6 @@ AS $$
         ca.ds_fonte
     FROM posicao p
     JOIN public.tb_ativo a ON a.id_ativo = p.id_ativo
-    LEFT JOIN public.vw_cotacao_atual ca ON ca.id_ativo = p.id_ativo
+    LEFT JOIN public.fn_cotacao_em(p_dt_ref) ca ON ca.id_ativo = p.id_ativo
     ORDER BY vl_posicao DESC;
 $$;

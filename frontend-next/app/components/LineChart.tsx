@@ -81,21 +81,28 @@ export default function LineChart({
             const linhas = series
               .map((s, k) => ({ nome: s.nome, cor: s.cor, v: valores[k][hover] }))
               .filter((l): l is { nome: string; cor: string; v: number } => l.v != null)
-              .map((l) => ({ ...l, texto: `${l.nome}: ${formato(l.v)}` }));
+              .map((l) => ({ ...l, valor: formato(l.v) }));
             const data = dataBR(xs[hover]);
-            const larg = Math.max(data.length, ...linhas.map((l) => l.texto.length + 3)) * 7 + 24;
+            // nome alinhado a esquerda (depois da bolinha) e o valor a direita, em colunas
+            const largNome = Math.max(...linhas.map((l) => l.nome.length)) * 7;
+            const largValor = Math.max(...linhas.map((l) => l.valor.length)) * 7;
+            const larg = Math.max(data.length * 7.5 + 24, 29 + largNome + 24 + largValor + 14);
             const alt = 14 + 20 * (linhas.length + 1);
             const bx = direita ? X(hover) - 12 - larg : X(hover) + 12;
             return (
               <g className="tip-caixa">
                 <rect x={bx} y={P.t + 4} width={larg} height={alt} rx={6} fill="#000" fillOpacity={0.72} />
                 <text x={bx + 12} y={P.t + 4 + 22} fill="#fff" fontSize={12} fontWeight={600}>{data}</text>
-                {linhas.map((l, i) => (
-                  <g key={l.nome}>
-                    <circle cx={bx + 17} cy={P.t + 4 + 22 + 20 * (i + 1) - 4} r={5} fill={l.cor} />
-                    <text x={bx + 29} y={P.t + 4 + 22 + 20 * (i + 1)} fill="#fff" fontSize={12}>{l.texto}</text>
-                  </g>
-                ))}
+                {linhas.map((l, i) => {
+                  const y = P.t + 4 + 22 + 20 * (i + 1);
+                  return (
+                    <g key={l.nome}>
+                      <circle cx={bx + 17} cy={y - 4} r={5} fill={l.cor} />
+                      <text x={bx + 29} y={y} fill="#fff" fontSize={12}>{l.nome}</text>
+                      <text x={bx + larg - 14} y={y} fill="#fff" fontSize={12} textAnchor="end">{l.valor}</text>
+                    </g>
+                  );
+                })}
               </g>
             );
           })()}

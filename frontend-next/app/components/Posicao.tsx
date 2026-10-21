@@ -13,14 +13,14 @@ type Linha = {
 const num = (v: unknown) => Number(v);
 const numN = (v: unknown) => (v == null ? null : Number(v));
 
-export default function Posicao({ idCorretora }: { idCorretora: number | null }) {
+export default function Posicao({ idCorretora, dataRef }: { idCorretora: number | null; dataRef: string | null }) {
   const [linhas, setLinhas] = useState<Linha[] | null>(null);
   const [logos, setLogos] = useState<Record<string, number | null>>({});
   const [erro, setErro] = useState("");
   const { ordenadas, Th } = useSort(linhas ?? [], "vl_posicao");
 
   useEffect(() => {
-    const busca = () => api<Linha[]>("/carteira/posicao", { params: { id_corretora: idCorretora == null ? undefined : String(idCorretora) } })
+    const busca = () => api<Linha[]>("/carteira/posicao", { params: { id_corretora: idCorretora == null ? undefined : String(idCorretora), data_ref: dataRef ?? undefined } })
       .then((r) => {
         const tot = r.reduce((a, l) => a + num(l.vl_posicao), 0);
         const ls = r
@@ -39,9 +39,9 @@ export default function Posicao({ idCorretora }: { idCorretora: number | null })
       .catch((e) => setErro(e.message));
     busca();
     // durante o pregao a cotacao muda a cada ~5 min (coleta intradia): refaz a busca no mesmo ritmo
-    const t = setInterval(busca, 5 * 60 * 1000);
-    return () => clearInterval(t);
-  }, [idCorretora]);
+    const t = dataRef ? null : setInterval(busca, 5 * 60 * 1000);   // snapshot de uma data passada nao muda
+    return () => { if (t) clearInterval(t); };
+  }, [idCorretora, dataRef]);
 
   if (erro) return <p className="err">{erro}</p>;
   if (!linhas) return <p className="muted">Carregando…</p>;
@@ -61,7 +61,7 @@ export default function Posicao({ idCorretora }: { idCorretora: number | null })
       <div className="big">{brl(total)}</div>
       <p className={cor(ganho)}>{brl(ganho)} ({pct(custo ? (100 * ganho) / custo : null)}) <span className="muted">no total</span></p>
       <p className={cor(ganhoDia)}>
-        {brl(ganhoDia)} ({pct(baseDia ? (100 * ganhoDia) / baseDia : null)}) <span className="muted">hoje</span>
+        {brl(ganhoDia)} ({pct(baseDia ? (100 * ganhoDia) / baseDia : null)}) <span className="muted">{dataRef ? "no dia" : "hoje"}</span>
         {intradia
           ? <span className="muted"> · cotação das {hora} (atraso de ~15 min)</span>
           : dtCotacao && <span className="muted"> · fechamento de {dtCotacao.split("-").reverse().join("/")}</span>}
@@ -69,7 +69,7 @@ export default function Posicao({ idCorretora }: { idCorretora: number | null })
       <table>
         <thead><tr>
           <Th c="sg_ticker">Ativo</Th><Th c="quantidade">Qtd</Th><Th c="preco_medio">PM</Th><Th c="preco_atual">Atual</Th>
-          <Th c="var_dia_pct">Hoje %</Th><Th c="ganho_dia">Hoje R$</Th>
+          <Th c="var_dia_pct">{dataRef ? "Dia %" : "Hoje %"}</Th><Th c="ganho_dia">{dataRef ? "Dia R$" : "Hoje R$"}</Th>
           <Th c="vl_posicao">Posição</Th><Th c="peso">Peso</Th><Th c="ganho_capital">Ganho</Th><Th c="ganho_capital_pct">%</Th>
         </tr></thead>
         <tbody>

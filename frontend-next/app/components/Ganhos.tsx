@@ -10,13 +10,13 @@ type Linha = {
 const CAMPOS = ["valor_investido", "ganho_realizado_vendas", "proventos",
   "ganho_nao_realizado", "ganho_total", "ganho_pct_total"] as const;
 
-export default function Ganhos({ idCorretora }: { idCorretora: number | null }) {
+export default function Ganhos({ idCorretora, dataRef }: { idCorretora: number | null; dataRef: string | null }) {
   const [linhas, setLinhas] = useState<Linha[] | null>(null);
   const [erro, setErro] = useState("");
   const { ordenadas, Th } = useSort(linhas ?? [], "ganho_pct_total");
 
   useEffect(() => {
-    api<Linha[]>("/carteira/ganhos", { params: { id_corretora: idCorretora == null ? undefined : String(idCorretora) } })
+    api<Linha[]>("/carteira/ganhos", { params: { id_corretora: idCorretora == null ? undefined : String(idCorretora), data_ref: dataRef ?? undefined } })
       .then((r) => setLinhas(
         r.map((l) => {
           const o = { ...l } as Record<string, unknown>;
@@ -24,7 +24,7 @@ export default function Ganhos({ idCorretora }: { idCorretora: number | null }) 
           return o as unknown as Linha;
         }).sort((a, b) => b.ganho_pct_total - a.ganho_pct_total)))
       .catch((e) => setErro(e.message));
-  }, [idCorretora]);
+  }, [idCorretora, dataRef]);
 
   if (erro) return <p className="err">{erro}</p>;
   if (!linhas) return <p className="muted">Carregando…</p>;

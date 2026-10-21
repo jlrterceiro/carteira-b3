@@ -6,7 +6,8 @@ import { api } from "../lib/api";
 import FiltroCorretora, { Corretora } from "./FiltroCorretora";
 import Login from "./Login";
 import MenuUsuario from "./MenuUsuario";
-import { ProvedorCorretora, Usuario } from "../lib/sessao";
+import { dataBR } from "../lib/api";
+import { ProvedorCorretora, ProvedorDataRef, Usuario } from "../lib/sessao";
 
 // Cada tela e uma rota (/posicao, /ganhos, /rentabilidade); o Perfil abre pelo menu do usuario (/perfil).
 const ABAS = [
@@ -15,12 +16,24 @@ const ABAS = [
   { href: "/rentabilidade", rotulo: "Rentabilidade" },
 ];
 
+const hojeISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+
 // Casca do app logado: barra lateral, barra do topo e filtro de corretora. Sem login mostra a tela de entrada NA MESMA
 // URL (link direto pra /rentabilidade pede login e, entrando, ja cai nela).
 export default function Casca({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Usuario | null | undefined>(undefined);
   const [corretoras, setCorretoras] = useState<Corretora[]>([]);
   const [corretora, setCorretora] = useState<number | null>(null);
+  // data de referencia (snapshot): vale pra todas as telas; fica so nesta aba do navegador
+  const [hoje] = useState(hojeISO);
+  const [dataRef, setDataRef] = useState<string | null>(() => {
+    try { const v = sessionStorage.getItem("data_ref"); return v && v < hoje ? v : null; } catch { return null; }
+  });
+  const escolheData = (v: string | null) => {
+    const d = v && v < hoje ? v : null;       // hoje (ou depois) = sem snapshot
+    setDataRef(d);
+    try { if (d) sessionStorage.setItem("data_ref", d); else sessionStorage.removeItem("data_ref"); } catch { /* ok */ }
+  };
   const pathname = usePathname();
   const router = useRouter();
 
@@ -72,6 +85,13 @@ export default function Casca({ children }: { children: React.ReactNode }) {
       </aside>
       <div className="main">
         <header className="topbar">
+          {!noPerfil && (
+            <label className="filtro-corretora">
+              <span className="muted">Data</span>
+              <input type="date" value={dataRef ?? ""} max={hoje} onChange={(e) => escolheData(e.target.value || null)} />
+              {dataRef && <button type="button" onClick={() => escolheData(null)}>Hoje</button>}
+            </label>
+          )}
           {!noPerfil && <FiltroCorretora corretoras={corretoras} valor={corretora} onChange={escolheCorretora} />}
           <MenuUsuario
             nome={user.nm_usuario}
@@ -85,7 +105,15 @@ export default function Casca({ children }: { children: React.ReactNode }) {
           />
         </header>
         <main className="content">
-          <ProvedorCorretora value={corretora}>{children}</ProvedorCorretora>
+          {!noPerfil && dataRef && (
+            <p className="snapshot-aviso">
+              Visão em <b>{dataBR(dataRef)}</b>: todas as telas mostram a carteira como estava nesse dia (operações, proventos e cotações até ele).{" "}
+              <button type="button" onClick={() => escolheData(null)}>Voltar para hoje</button>
+            </p>
+          )}
+          <ProvedorCorretora value={corretora}>
+            <ProvedorDataRef value={noPerfil ? null : dataRef}>{children}</ProvedorDataRef>
+          </ProvedorCorretora>
         </main>
       </div>
     </div>

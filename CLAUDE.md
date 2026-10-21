@@ -165,6 +165,15 @@ coleta gravava isso como "de hoje" (Posição mostrava um dia falso negativo). A
 `DailyFluctuationHistory/<TICKER>` (data do pregão em `TradgFlr.date`, horário real da última barra, só até 18:00). Antes do pregão abrir nada é
 gravado e a Posição mostra o último dia fechado.
 
+**Data de referência / snapshot (2026-10-21)**: um seletor "Data" na barra do topo (à esquerda do filtro de corretora, botão "Hoje" pra limpar, aviso
+azul quando ativo; fica em `sessionStorage`, só naquela aba; escondido no Perfil) faz Posição, Ganhos e Rentabilidade mostrarem a carteira como estava naquele
+dia — pra análises e pro imposto de renda. API: `data_ref` em `/carteira/posicao` e `/carteira/ganhos` (hoje ou futuro = sem snapshot); a Rentabilidade usa o
+`fim` que já existia (janelas 30 dias…Total terminam na data; matriz e benchmarks também). SQL: `fn_cotacao_em(p_dt)` (NULL = `vw_cotacao_atual`; data =
+último pregão ≤ data: preço REAL do dia, mesma base nominal da quantidade/PM de `tb_posicao_diaria` no último dia ≤ data, e anterior reexpresso nas unidades do
+dia), `fn_posicao_atual(usuario, corretora, p_dt_ref)` e `fn_ganho_total(..., p_dt_ref)` (vendas e proventos até a data pela data EX, só as compras até ela,
+posição e preço dela). Snapshot em 20/10/2026 = valores de hoje ao centavo. Pro IR: custo = quantidade × PM do dia 31/12 (coluna PM da Posição); proventos
+do ano pela data de PAGAMENTO (a DIRPF) NÃO são o que o Ganhos mostra (data ex) — relatório próprio fica pendente.
+
 **Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
 descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a
 carteira do usuário sem perguntar). A tabela `tb_carteira` e o `id_carteira` continuam existindo POR DENTRO (as

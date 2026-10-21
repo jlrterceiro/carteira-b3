@@ -7,3 +7,8 @@ export type Usuario = { nm_usuario: string; ds_email: string; sg_usuario: string
 const CorretoraCtx = createContext<number | null>(null);
 export const ProvedorCorretora = CorretoraCtx.Provider;
 export const useCorretora = () => useContext(CorretoraCtx);
+
+// Data de referencia (snapshot): todas as telas mostram a carteira como estava naquele dia (yyyy-mm-dd). null = hoje.
+const DataRefCtx = createContext<string | null>(null);
+export const ProvedorDataRef = DataRefCtx.Provider;
+export const useDataRef = () => useContext(DataRefCtx);

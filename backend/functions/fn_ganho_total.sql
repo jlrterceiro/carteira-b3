@@ -11,12 +11,16 @@
 -- compras, sem filtro de periodo -- e o capital que de fato foi colocado no ativo).
 -- Todos os parametros sao opcionais (NULL = sem filtro).
 
+-- p_dt_ref: visao de snapshot -- tudo como estava naquela data (vendas e proventos ate ela, posicao e preco dela, so as compras
+-- ate ela). NULL = agora. Proventos entram pela data EX (<= p_dt_ref).
+DROP FUNCTION IF EXISTS public.fn_ganho_total(DATE, DATE, INTEGER, INTEGER, TEXT);
 CREATE OR REPLACE FUNCTION public.fn_ganho_total(
     p_dt_inicio DATE DEFAULT NULL,
     p_dt_fim DATE DEFAULT NULL,
     p_id_carteira INTEGER DEFAULT NULL,
     p_id_corretora INTEGER DEFAULT NULL,
-    p_sg_usuario TEXT DEFAULT NULL
+    p_sg_usuario TEXT DEFAULT NULL,
+    p_dt_ref DATE DEFAULT NULL
 )
 RETURNS TABLE (
     id_ativo INTEGER,
@@ -31,10 +35,10 @@ RETURNS TABLE (
 LANGUAGE sql
 AS $$
     WITH realizado AS (
-        SELECT * FROM public.fn_ganho_realizado_venda(p_dt_inicio, p_dt_fim, p_id_carteira, p_id_corretora, p_sg_usuario)
+        SELECT * FROM public.fn_ganho_realizado_venda(p_dt_inicio, COALESCE(p_dt_fim, p_dt_ref), p_id_carteira, p_id_corretora, p_sg_usuario)
     ),
     dividendo AS (
-        SELECT * FROM public.fn_provento_recebido(p_dt_inicio, p_dt_fim, p_id_carteira, p_id_corretora, p_sg_usuario)
+        SELECT * FROM public.fn_provento_recebido(p_dt_inicio, COALESCE(p_dt_fim, p_dt_ref), p_id_carteira, p_id_corretora, p_sg_usuario)
     ),
     posicao_atual AS (
         SELECT
@@ -44,7 +48,7 @@ AS $$
         FROM public.tb_posicao_diaria p
         JOIN public.tb_carteira c ON c.id_carteira = p.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
-        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria)
+        WHERE p.dt_posicao = (SELECT MAX(dt_posicao) FROM public.tb_posicao_diaria WHERE p_dt_ref IS NULL OR dt_posicao <= p_dt_ref)
           AND (p_id_carteira IS NULL OR p.id_carteira = p_id_carteira)
           AND (p_id_corretora IS NULL OR p.id_corretora = p_id_corretora)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)
@@ -52,7 +56,7 @@ AS $$
         HAVING SUM(p.qt_ativo) > 0
     ),
     cotacao_atual AS (
-        SELECT id_ativo, vl_preco_atual FROM public.vw_cotacao_atual
+        SELECT id_ativo, vl_preco_atual FROM public.fn_cotacao_em(p_dt_ref)
     ),
     nao_realizado AS (
         SELECT
@@ -70,6 +74,7 @@ AS $$
         JOIN public.tb_carteira c ON c.id_carteira = o.id_carteira
         JOIN public.tb_usuario u ON u.id_usuario = c.id_usuario
         WHERE top.sg_tipo_operacao = 'COMPRA'
+          AND (p_dt_ref IS NULL OR o.dt_operacao <= p_dt_ref)
           AND (p_id_carteira IS NULL OR o.id_carteira = p_id_carteira)
           AND (p_id_corretora IS NULL OR o.id_corretora = p_id_corretora)
           AND (p_sg_usuario IS NULL OR u.sg_usuario = p_sg_usuario)

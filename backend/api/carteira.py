@@ -86,21 +86,28 @@ def corretoras(usuario=Depends(get_current_user), conn=Depends(get_db)):
 
 # id_corretora opcional em posicao/ganhos/rentabilidade: sem ele = todas as corretoras do usuario. O filtro SEMPRE
 # vem junto com o usuario autenticado, entao um id de corretora alheio so devolve vazio.
+def _data_ref(data_ref: date | None) -> date | None:
+    """snapshot: a carteira e os precos como estavam em `data_ref`. Hoje (ou futuro) = sem snapshot (o preco de agora, com intradia)."""
+    return None if data_ref is None or data_ref >= date.today() else data_ref
+
+
 @router.get('/posicao')
-def posicao(id_corretora: int | None = None, usuario=Depends(get_current_user), conn=Depends(get_db)):
+def posicao(id_corretora: int | None = None, data_ref: date | None = None,
+            usuario=Depends(get_current_user), conn=Depends(get_db)):
     with conn.cursor() as cur:
-        cur.execute('SELECT * FROM fn_posicao_atual(%s, %s)', (usuario['sg_usuario'], id_corretora))
+        cur.execute('SELECT * FROM fn_posicao_atual(%s, %s, %s)', (usuario['sg_usuario'], id_corretora, _data_ref(data_ref)))
         colunas = [c.name for c in cur.description]
         linhas = [dict(zip(colunas, row)) for row in cur.fetchall()]
     return linhas
 
 
 @router.get('/ganhos')
-def ganhos(id_corretora: int | None = None, usuario=Depends(get_current_user), conn=Depends(get_db)):
+def ganhos(id_corretora: int | None = None, data_ref: date | None = None,
+           usuario=Depends(get_current_user), conn=Depends(get_db)):
     with conn.cursor() as cur:
         cur.execute(
-            'SELECT * FROM fn_ganho_total(NULL, NULL, NULL, %s, %s)',
-            (id_corretora, usuario['sg_usuario']),
+            'SELECT * FROM fn_ganho_total(NULL, NULL, NULL, %s, %s, %s)',
+            (id_corretora, usuario['sg_usuario'], _data_ref(data_ref)),
         )
         colunas = [c.name for c in cur.description]
         linhas = [dict(zip(colunas, row)) for row in cur.fetchall()]
