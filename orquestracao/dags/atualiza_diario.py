@@ -1,6 +1,6 @@
 """
 Rotina diaria dos dados (equivale ao scrape/atualiza_diario.py, mas com cada etapa visivel, com retry e historico):
-cotacoes (COTAHIST) -> negocios -> eventos da B3 -> reconstrucao diaria dos eventos -> proventos -> datas de pagamento
+cotacoes (COTAHIST) -> benchmarks (Ibovespa e CDI) -> negocios -> eventos da B3 -> reconstrucao diaria dos eventos -> proventos -> datas de pagamento
 (CVM e B3) -> fn_rebuild_tudo(). Cada etapa e uma tarefa; se uma falha, as seguintes nao rodam e da pra reexecutar so dali.
 Dias de semana as 20h (Brasilia), depois do COTAHIST do dia. Feriado: a etapa de cotacoes nao acha dado novo e segue.
 """
@@ -28,6 +28,7 @@ with DAG(
     tags=['dados', 'diario'],
 ) as dag:
     cotacoes = etapa('cotacoes_cotahist', 'scraper_cotacoes_b3.py')
+    benchmarks = etapa('benchmarks', 'scraper_benchmarks.py')
     negocios = etapa('negocios_b3', 'scraper_negocios_b3.py')
     eventos = etapa('eventos_b3', 'scraper_eventos_corporativos_b3.py')
     reconstroi = etapa('reconstroi_eventos', 'reconstroi_eventos.py', '--diario', '--aplica')
@@ -36,4 +37,4 @@ with DAG(
     pagamentos_b3 = etapa('pagamentos_b3', 'scraper_pagamentos_b3.py')
     rebuild = etapa('rebuild_tudo', 'rebuild_tudo.py')
 
-    cotacoes >> negocios >> eventos >> reconstroi >> proventos >> pagamentos_cvm >> pagamentos_b3 >> rebuild
+    cotacoes >> benchmarks >> negocios >> eventos >> reconstroi >> proventos >> pagamentos_cvm >> pagamentos_b3 >> rebuild

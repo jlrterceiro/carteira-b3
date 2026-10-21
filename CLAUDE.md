@@ -92,7 +92,7 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~20k lin
   preço, ver "Eventos corporativos: reconstrução"). Apoio: `eventos_por_oscilacao.py`, `eventos_por_opcoes.py`,
   `compara_eventos_opcoes.py`. `scraper_eventos_cvm.py [--aplica]` — carga ÚNICA do passado via avisos da CVM
   (com PDF); `prototipo_eventos_cvm.py` é a versão só-leitura.
-- `atualiza_diario.py` — rotina diária completa, só dados estruturados (cotações → negócios → eventos B3 →
+- `atualiza_diario.py` — rotina diária completa, só dados estruturados (cotações → benchmarks → negócios → eventos B3 →
   reconstroi `--diario` → proventos → `fn_rebuild_tudo()`).
 - `scraper_pagamentos_b3.py [SG_EMISSOR]` — data de pagamento dos proventos (`GetListedSupplementCompany.cashDividends.paymentDate`),
   só upsert em `tb_provento_pagamento`; roda na rotina diária depois de `scraper_proventos.py`.
@@ -156,7 +156,7 @@ zip dentro de zip com o XML BVBG.087.01; vazio em dia sem pregão; baixar UM por
 derruba as conexões). É índice de RETORNO TOTAL (a metodologia da B3 reinveste os proventos; bruto×líquido de IR não verificado). CDI = BCB SGS 12
 (% a.d.; o BCB resolve pra IPv6 e pendura, o script força IPv4; o SGS 7 do Ibovespa parou em 2019). `GET /carteira/benchmarks?de=&ate=` devolve
 IBOV e CDI acumulados nos pregões a partir do fechamento ANTERIOR a `de` (mesma base do TWR); a tela passa a data do 1º ponto da carteira.
-O gráfico (`LineChart`) é multi-série (Carteira, CDI, Ibovespa, com caixas de seleção), eixo esquerdo sem casas decimais, datas dd/mm/aaaa e
+O coletor roda na rotina diária (logo depois das cotações, no `atualiza_diario.py` e na DAG; incremental: só os pregões que faltam). O gráfico (`LineChart`) é multi-série (Carteira azul, CDI verde `#059669`, Ibovespa rosa `#db2777`, com caixas de seleção; S&P 500 ficou de fora por falta de fonte aberta acessível: o FRED, com chave gratuita, é a opção), eixo esquerdo sem casas decimais, datas dd/mm/aaaa e
 tooltip em caixa preta translúcida com bolinha na cor de cada linha.
 
 **Coleta intradia: armadilha do `Msg.dtTm` (2026-10-21)**: nas respostas de `cotacao.b3.com.br` o `Msg.dtTm` é a hora da REQUISIÇÃO, não a do
