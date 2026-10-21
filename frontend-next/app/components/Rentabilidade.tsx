@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, useEffect, useState } from "react";
-import { api, cor, pct, PERIODOS, periodoParams } from "../lib/api";
-import LineChart from "./LineChart";
+import { api, cor, pct, pctInteiro, PERIODOS, periodoParams } from "../lib/api";
+import LineChart, { Serie } from "./LineChart";
 
 type Resp = {
   metodo?: string;
@@ -11,13 +11,13 @@ type Resp = {
   total_pct: number | null;
 };
 
-type Serie = { periodo: string; rentabilidade_pct: number }[];
+type SerieMes = { periodo: string; rentabilidade_pct: number }[];
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const pctBR = (v: number) => `${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 
 // Uma linha por ano: 12 meses, rentabilidade do ano e acumulada (juros compostos desde o primeiro ano ate o fim
 // daquele ano). Mais recente em cima. Mes sem dado (antes do inicio / ainda nao aconteceu) fica "—".
-function Matriz({ mensal, anual }: { mensal: Serie; anual: Serie }) {
+function Matriz({ mensal, anual }: { mensal: SerieMes; anual: SerieMes }) {
   const porMes = new Map(mensal.map((m) => [m.periodo, m.rentabilidade_pct]));
   const crescente = [...anual].sort((a, b) => a.periodo.localeCompare(b.periodo));
   const linhas = crescente
@@ -62,6 +62,11 @@ function Matriz({ mensal, anual }: { mensal: Serie; anual: Serie }) {
   );
 }
 
+const BENCH = [
+  { chave: "cdi", campo: "cdi_pct", nome: "CDI", cor: "#d97706" },
+  { chave: "ibov", campo: "ibov_pct", nome: "Ibovespa", cor: "#7c3aed" },
+] as const;
+
 type Metodo = "receber" | "status_invest";
 const METODOS: { id: Metodo; rotulo: string; descricao: string }[] = [
   { id: "receber", rotulo: "TWR (proventos a receber)",
@@ -89,6 +94,18 @@ function TwrView({ metodo, periodo, corr }: { metodo: Metodo; periodo: string; c
   const dados = atual?.dados ?? null;
   const erro = atual?.erro ?? "";
 
+  // CDI e Ibovespa acumulados a partir do fechamento anterior ao 1o ponto da carteira (mesma base do TWR)
+  type Bench = { dt_dia: string; ibov_pct: number | null; cdi_pct: number | null };
+  const [bench, setBench] = useState<{ de: string; ate: string; linhas: Bench[] } | null>(null);
+  const de = dados?.diaria[0]?.dt_dia, ate = dados?.diaria[dados.diaria.length - 1]?.dt_dia;
+  useEffect(() => {
+    if (!de || !ate) return;
+    api<Bench[]>("/carteira/benchmarks", { params: { de, ate } })
+      .then((linhas) => setBench({ de, ate, linhas }))
+      .catch(() => setBench(null));
+  }, [de, ate]);
+  const [mostra, setMostra] = useState<{ cdi: boolean; ibov: boolean }>({ cdi: true, ibov: true });
+
   const pontos = (dados?.diaria ?? []).reduce<{ x: string; y: number; f: number }[]>((out, d) => {
     const f = (out.length ? out[out.length - 1].f : 1) * (1 + d.rentabilidade_pct / 100);
     out.push({ x: d.dt_dia, y: (f - 1) * 100, f });
@@ -97,6 +114,13 @@ function TwrView({ metodo, periodo, corr }: { metodo: Metodo; periodo: string; c
 
   if (erro) return <p className="err">{erro}</p>;
   if (!dados) return <p className="muted">Carregando…</p>;
+  const benchAtual = bench && bench.de === de && bench.ate === ate ? bench : null;
+  const series: Serie[] = [{ nome: "Carteira", cor: "var(--accent)", pontos: pontos.map((p) => ({ x: p.x, y: p.y })) }];
+  for (const b of BENCH) {
+    if (!mostra[b.chave] || !benchAtual) continue;
+    const pts = benchAtual.linhas.filter((l) => l[b.campo] != null).map((l) => ({ x: l.dt_dia, y: l[b.campo] as number }));
+    if (pts.length) series.push({ nome: b.nome, cor: b.cor, pontos: pts });
+  }
 
   // equivalentes compostos do retorno do periodo: (1+T)^(dias de referencia / dias do periodo) - 1.
   // O 1o ponto da serie e o retorno do proprio dia, entao o periodo cobre (ultimo - primeiro + 1) dias corridos.
@@ -118,7 +142,20 @@ function TwrView({ metodo, periodo, corr }: { metodo: Metodo; periodo: string; c
           <span>Anualizada: <b className={cor(aoAno)}>{aoAno == null ? "—" : `${pct(aoAno)} a.a.`}</b></span>
           <span className="muted">equivalente composto em {dias} dias{aoAno == null ? " (curto demais para anualizar)" : ""}</span>
         </p>
-        <LineChart pontos={pontos} formato={(v) => pct(v)} />
+        <div className="legenda">
+          <span><i style={{ background: "var(--accent)" }} />Carteira <b className={cor(dados.total_pct)}>{pct(dados.total_pct)}</b></span>
+          {BENCH.map((b) => {
+            const linhas = benchAtual?.linhas ?? [];
+            const ult = [...linhas].reverse().find((l) => l[b.campo] != null)?.[b.campo] ?? null;
+            return (
+              <label key={b.chave}>
+                <input type="checkbox" checked={mostra[b.chave]} onChange={(e) => setMostra({ ...mostra, [b.chave]: e.target.checked })} />
+                <i style={{ background: b.cor }} />{b.nome} <b>{ult == null ? "—" : pct(ult)}</b>
+              </label>
+            );
+          })}
+        </div>
+        <LineChart series={series} formato={(v) => pct(v)} formatoEixo={pctInteiro} />
       </div>
       {completo && <Matriz mensal={completo.mensal} anual={completo.anual} />}
     </>

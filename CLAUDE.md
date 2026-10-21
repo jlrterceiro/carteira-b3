@@ -150,6 +150,21 @@ se a data da cotação for hoje, upsert em `tb_cotacao_intradia` (uma linha por 
 em dia útil de 9h50 a 18h40; precisa ficar de pé (hoje é manual: `python3 scrape/scraper_cotacao_intradia.py --loop`).
 Rentabilidade/ganho realizado e as derivadas NÃO usam o intradia (continuam fechamento do COTAHIST, via `fn_rebuild_tudo`).
 
+**Benchmarks no gráfico de Rentabilidade (2026-10-21)**: `tb_benchmark_diario` (IBOV e CDI, desde 2018) via `scrape/scraper_benchmarks.py`
+(só upsert, incremental). IBOV = fechamento diário do arquivo de índices da B3 (`www.b3.com.br/pesquisapregao/download?filelist=IR<aammdd>.zip`,
+zip dentro de zip com o XML BVBG.087.01; vazio em dia sem pregão; baixar UM por vez e com a conexão reaproveitada — em paralelo a B3/Cloudflare
+derruba as conexões). É índice de RETORNO TOTAL (a metodologia da B3 reinveste os proventos; bruto×líquido de IR não verificado). CDI = BCB SGS 12
+(% a.d.; o BCB resolve pra IPv6 e pendura, o script força IPv4; o SGS 7 do Ibovespa parou em 2019). `GET /carteira/benchmarks?de=&ate=` devolve
+IBOV e CDI acumulados nos pregões a partir do fechamento ANTERIOR a `de` (mesma base do TWR); a tela passa a data do 1º ponto da carteira.
+O gráfico (`LineChart`) é multi-série (Carteira, CDI, Ibovespa, com caixas de seleção), eixo esquerdo sem casas decimais, datas dd/mm/aaaa e
+tooltip em caixa preta translúcida com bolinha na cor de cada linha.
+
+**Coleta intradia: armadilha do `Msg.dtTm` (2026-10-21)**: nas respostas de `cotacao.b3.com.br` o `Msg.dtTm` é a hora da REQUISIÇÃO, não a do
+negócio — fora do pregão ele devolve o último preço (inclusive do after-market, que difere do fechamento oficial) com a hora de agora, e a
+coleta gravava isso como "de hoje" (Posição mostrava um dia falso negativo). Agora o `scraper_cotacao_intradia.py` usa
+`DailyFluctuationHistory/<TICKER>` (data do pregão em `TradgFlr.date`, horário real da última barra, só até 18:00). Antes do pregão abrir nada é
+gravado e a Posição mostra o último dia fechado.
+
 **Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
 descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a
 carteira do usuário sem perguntar). A tabela `tb_carteira` e o `id_carteira` continuam existindo POR DENTRO (as
@@ -547,7 +562,8 @@ scripts de `scrape/` e leem o `.env` da raiz; o projeto inteiro é montado em `/
 do `.env`. Instalado e testado em 2026-10-19 (Docker 29.9.1 / Compose 5.6 via repo oficial da Docker no Fedora 44; o usuário
 precisa estar no grupo `docker`). DAGs (nascem PAUSADAS; as duas foram ligadas em 2026-10-19): `atualiza_diario` (dias úteis 20h, uma tarefa por etapa, retry 2× a cada 10 min,
 termina em `scrape/rebuild_tudo.py`; o `scrape/atualiza_diario.py` segue existindo como CLI manual) e `cotacao_intradia`
-(`*/5 10-18 * * 1-5`, SUBSTITUIU o `scraper_cotacao_intradia.py --loop`, que foi desligado). Pendente: alerta de falha (e-mail/Telegram), checagem
+(`*/5 10-18 * * 1-5`, SUBSTITUIU o `scraper_cotacao_intradia.py --loop`, que foi desligado); o Airflow foi DESLIGADO em 2026-10-21 a pedido
+do usuário (`docker compose stop`; religar com `docker compose up -d`) — enquanto parado, a coleta intradia e a DAG diária não rodam, use `scrape/atualiza_diario.py`. Pendente: alerta de falha (e-mail/Telegram), checagem
 de "COTAHIST do dia chegou" e feriados.
 
 ## Pipeline de recálculo

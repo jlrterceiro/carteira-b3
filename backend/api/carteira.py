@@ -166,3 +166,37 @@ def rentabilidade(
         total_pct = float(total_row[0]) if total_row and total_row[0] is not None else None
 
     return {'metodo': metodo, 'diaria': diaria, 'mensal': mensal, 'anual': anual, 'total_pct': total_pct}
+
+
+@router.get('/benchmarks')
+def benchmarks(
+    de: date,
+    ate: date,
+    usuario=Depends(get_current_user),
+    conn=Depends(get_db),
+):
+    """Ibovespa e CDI acumulados (%) nos pregoes de `de` ate `ate`, a partir do fechamento do pregao ANTERIOR a `de`
+    (a carteira, no TWR, tambem parte do fechamento anterior). Pra por no mesmo grafico da rentabilidade: o front passa a
+    data do 1o ponto da carteira. IBOV = fechamento do indice (retorno total: a metodologia da B3 reinveste os proventos); CDI = taxa diaria composta, onde a taxa do
+    dia t rende de t ate o proximo dia util. Dado de mercado, igual pra todos os usuarios."""
+    with conn.cursor() as cur:
+        cur.execute(
+            '''
+            WITH cdi AS (
+                SELECT dt_dia, COALESCE(SUM(LN(1 + vl_retorno_pct / 100)) OVER (
+                           ORDER BY dt_dia ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS l
+                FROM public.tb_benchmark_diario WHERE cd_benchmark = 'CDI'
+            ),
+            ib AS (SELECT dt_dia, vl_nivel FROM public.tb_benchmark_diario WHERE cd_benchmark = 'IBOV'),
+            base AS (SELECT max(dt_dia) AS b FROM ib WHERE dt_dia < %s),
+            nivel0 AS (SELECT ib.vl_nivel FROM ib JOIN base ON ib.dt_dia = base.b),
+            l0 AS (SELECT l FROM cdi, base WHERE cdi.dt_dia <= base.b ORDER BY cdi.dt_dia DESC LIMIT 1)
+            SELECT d.dt_dia,
+                   100 * (d.vl_nivel / NULLIF((SELECT vl_nivel FROM nivel0), 0) - 1) AS ibov_pct,
+                   100 * (EXP((SELECT l FROM cdi WHERE cdi.dt_dia <= d.dt_dia ORDER BY cdi.dt_dia DESC LIMIT 1)
+                              - (SELECT l FROM l0)) - 1) AS cdi_pct
+            FROM ib d
+            WHERE d.dt_dia BETWEEN %s AND %s
+            ORDER BY d.dt_dia
+            ''', (de, de, ate))
+        return [{'dt_dia': r[0].isoformat(), 'ibov_pct': _f(r[1]), 'cdi_pct': _f(r[2])} for r in cur.fetchall()]

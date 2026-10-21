@@ -41,6 +41,10 @@ tfoot td { font-weight: 600; }
 .chart .grid { stroke: var(--line); } .chart .grid.zero { stroke: var(--muted); stroke-width: 2.5; }
 .chart .tick { fill: var(--muted); font-size: 11px; }
 .chart .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.legenda { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: center; margin: 0 0 8px; font-size: 13px; }
+.legenda i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.legenda label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.legenda input { padding: 0; }
 .chart .cursor { stroke: var(--muted); stroke-dasharray: 3 3; }
 .chart .dot { fill: var(--accent); } .chart .tip { fill: var(--fg); font-size: 12px; }
 th.sortable { cursor: pointer; user-select: none; }

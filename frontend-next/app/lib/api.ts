@@ -41,6 +41,13 @@ export const pct = (v: number | null | undefined) =>
         maximumFractionDigits: 2,
       })}%`;
 
+// eixo do grafico: sem casas decimais ("+40%")
+export const pctInteiro = (v: number) =>
+  `${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`;
+
+// "2025-10-20" -> "20/10/2025"
+export const dataBR = (iso: string) => iso.split("-").reverse().join("/");
+
 export const cor = (v: number | null | undefined) =>
   v == null || v === 0 ? "" : v > 0 ? "pos" : "neg";
 

@@ -1,6 +1,10 @@
 """
-Cotacao DURANTE o pregao, direto do endpoint que o site da B3 usa (cotacao.b3.com.br/mds/api/v1/instrumentQuotation/<TICKER>,
-atraso de ~15 min, preco REAL do dia). Grava a ultima cotacao de cada ativo em tb_cotacao_intradia (upsert, sem historico).
+Cotacao DURANTE o pregao, direto do endpoint que o site da B3 usa (cotacao.b3.com.br/mds/api/v1/DailyFluctuationHistory/<TICKER>,
+barras de 1 min, atraso de ~15 min, preco REAL do dia). Grava a ultima cotacao de cada ativo em tb_cotacao_intradia (upsert, sem historico).
+
+ATENCAO: o campo Msg.dtTm das respostas da B3 e a hora da REQUISICAO, nao a do negocio (fora do pregao ele devolve o ultimo preco
+com a hora de agora). A data do pregao vem de TradgFlr.date e a hora do negocio da ultima barra; so conta barra ate 18:00 (pregao
+regular + leilao de fechamento), pra nao pegar o after-market, que difere do fechamento oficial.
 
 Por padrao so os ativos com posicao aberta de algum usuario (poucas dezenas de chamadas); --todos pega os ativos ativos.
 So grava se a data da cotacao for hoje (pregao fechado/feriado devolve o ultimo dia, que o COTAHIST ja cobre).
@@ -13,13 +17,14 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime, time as dtime
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from db_lib import get_conn
 
-URL = 'https://cotacao.b3.com.br/mds/api/v1/instrumentQuotation/{t}'
+URL = 'https://cotacao.b3.com.br/mds/api/v1/DailyFluctuationHistory/{t}'
+FIM_PREGAO = '18:00:00'
 INTERVALO = 300
 
 
@@ -29,12 +34,15 @@ def busca(ticker):
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 d = json.load(r)
-            q = d['Trad'][0]['scty']['SctyQtn']
-            if not q.get('curPrc'):
+            t = d['TradgFlr']
+            barras = [x for x in t['scty']['lstQtn'] if x['dtTm'] <= FIM_PREGAO]
+            if not barras or not t.get('date'):
                 return None
-            return {'preco': q['curPrc'], 'abertura': q.get('opngPric'), 'minimo': q.get('minPric'),
-                    'maximo': q.get('maxPric'), 'variacao': q.get('prcFlcn'),
-                    'dh': datetime.strptime(d['Msg']['dtTm'], '%Y-%m-%d %H:%M:%S')}
+            ult = barras[-1]
+            precos = [x['closPric'] for x in barras]
+            return {'preco': ult['closPric'], 'abertura': barras[0]['closPric'], 'minimo': min(precos), 'maximo': max(precos),
+                    'variacao': ult.get('prcFlcn'),
+                    'dh': datetime.combine(date.fromisoformat(t['date']), dtime.fromisoformat(ult['dtTm']))}
         except (KeyError, IndexError, TypeError):
             return None            # ticker sem negocio / desconhecido
         except Exception:
