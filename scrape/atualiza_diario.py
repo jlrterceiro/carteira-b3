@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import date
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(AQUI)
@@ -32,6 +33,8 @@ def main():
     py = sys.executable
     passo('cotacoes (COTAHIST, incremental)', [py, 'scrape/scraper_cotacoes_b3.py'])
     passo('benchmarks (Ibovespa B3, CDI BCB)', [py, 'scrape/scraper_benchmarks.py'])
+    passo('quantidade de acoes por trimestre (CVM)', [py, 'scrape/scraper_acoes_emitidas.py'])
+    passo('insiders (CVM, VLMO)', [py, 'scrape/scraper_insiders_cvm.py', '--desde', str(date.today().year - 1)])
     passo('negocios consolidados da B3', [py, 'scrape/scraper_negocios_b3.py'])
     passo('eventos corporativos (API da B3)', [py, 'scrape/scraper_eventos_corporativos_b3.py'])
     passo('eventos pela oscilacao oficial (arquivo diario)', [py, 'scrape/reconstroi_eventos.py', '--diario', '--aplica'])

@@ -13,6 +13,8 @@ import { ProvedorCorretora, ProvedorDataRef, Usuario } from "../lib/sessao";
 const ABAS = [
   { href: "/posicao", rotulo: "Posição" },
   { href: "/ganhos", rotulo: "Ganhos" },
+  { href: "/proventos", rotulo: "Proventos" },
+  { href: "/insiders", rotulo: "Insiders" },
   { href: "/rentabilidade", rotulo: "Rentabilidade" },
 ];
 
@@ -79,7 +81,7 @@ export default function Casca({ children }: { children: React.ReactNode }) {
         <h1 className="brand">Minha Carteira</h1>
         <nav>
           {ABAS.map((a) => (
-            <Link key={a.href} href={a.href} className={pathname === a.href ? "on" : ""}>{a.rotulo}</Link>
+            <Link key={a.href} href={a.href} className={pathname === a.href || pathname.startsWith(`${a.href}/`) ? "on" : ""}>{a.rotulo}</Link>
           ))}
         </nav>
       </aside>

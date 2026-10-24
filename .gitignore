@@ -22,3 +22,6 @@ __pycache__/
 
 # Airflow
 orquestracao/logs/
+
+# CA da rede do TJPI (inspecao HTTPS): so local, nunca commitar
+scrape/certs/

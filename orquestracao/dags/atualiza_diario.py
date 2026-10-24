@@ -29,6 +29,8 @@ with DAG(
 ) as dag:
     cotacoes = etapa('cotacoes_cotahist', 'scraper_cotacoes_b3.py')
     benchmarks = etapa('benchmarks', 'scraper_benchmarks.py')
+    acoes_emitidas = etapa('acoes_emitidas_cvm', 'scraper_acoes_emitidas.py')
+    insiders = etapa('insiders_cvm', 'scraper_insiders_cvm.py', '--desde', '{{ data_interval_end.year - 1 }}')
     negocios = etapa('negocios_b3', 'scraper_negocios_b3.py')
     eventos = etapa('eventos_b3', 'scraper_eventos_corporativos_b3.py')
     reconstroi = etapa('reconstroi_eventos', 'reconstroi_eventos.py', '--diario', '--aplica')
@@ -37,4 +39,4 @@ with DAG(
     pagamentos_b3 = etapa('pagamentos_b3', 'scraper_pagamentos_b3.py')
     rebuild = etapa('rebuild_tudo', 'rebuild_tudo.py')
 
-    cotacoes >> benchmarks >> negocios >> eventos >> reconstroi >> proventos >> pagamentos_cvm >> pagamentos_b3 >> rebuild
+    cotacoes >> benchmarks >> acoes_emitidas >> insiders >> negocios >> eventos >> reconstroi >> proventos >> pagamentos_cvm >> pagamentos_b3 >> rebuild

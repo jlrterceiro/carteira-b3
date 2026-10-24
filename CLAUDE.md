@@ -86,6 +86,8 @@ cotações, ~229k linhas de posição diária, ~10,9k proventos brutos, ~20k lin
   última cotação de cada ativo). `--full` substitui o histórico inteiro (1994+). `--novos` faz a carga completa
   só dos ativos que ainda não têm nenhuma cotação (cadastro novo). Ver "Cotações (COTAHIST)" e "Cotação real ×
   ajustada" abaixo.
+- `scraper_acoes_emitidas.py` — quantidade de ações por emissor/trimestre (CVM `composicao_capital`, escala inferida) → `tb_acoes_emissor`; base do valor de mercado histórico dos insiders (rodar ANTES de `scraper_insiders_cvm.py`; entra na rotina diária).
+- `scraper_insiders_cvm.py [--desde 2018]` — insiders (VLMO da CVM): movimentações, saldo inicial, valor de mercado da época, marcas de bloco/suspeito/rotina e eventos do estudo de retorno (ver "Insiders").
 - `scraper_negocios_b3.py [DATA... | --desde DATA]` — coletor do arquivo diário de negócios consolidados da B3
   (`tb_negocio_diario`, com a oscilação oficial), só ações do cadastro, 3 rodadas de retry.
 - `reconstroi_eventos.py [--aplica] [--diario]` — reconstrói `tb_evento_corporativo` (S1 oscilação + S2 opções + S3
@@ -173,6 +175,59 @@ dia — pra análises e pro imposto de renda. API: `data_ref` em `/carteira/posi
 dia), `fn_posicao_atual(usuario, corretora, p_dt_ref)` e `fn_ganho_total(..., p_dt_ref)` (vendas e proventos até a data pela data EX, só as compras até ela,
 posição e preço dela). Snapshot em 20/10/2026 = valores de hoje ao centavo. Pro IR: custo = quantidade × PM do dia 31/12 (coluna PM da Posição); proventos
 do ano pela data de PAGAMENTO (a DIRPF) NÃO são o que o Ganhos mostra (data ex) — relatório próprio fica pendente.
+
+**Tela de Proventos (2026-10-21)**: rota `/proventos` (menu lateral, entre Ganhos e Rentabilidade), gráfico de COLUNAS verticais (`BarChart.tsx`, SVG próprio)
+do provento LÍQUIDO (`tb_provento_recebido_tipo.vl_total`) por barra, contado na data EX (decisão do usuário; a mesma da tela de Ganhos, então "Tudo" = soma de `proventos` do Ganhos). Agrupar por Mês /
+Trimestre / Semestre / Ano; janela 6 meses / 1 ano / 2 anos / 5 anos / Tudo (a janela começa no início da barra que contém o 1º mês dela, nenhuma barra
+fica pela metade; barra sem provento = 0). Respeita o filtro de corretora e a data de referência (só ex até a data). `GET /carteira/proventos?agrupar=mes|trimestre|semestre|ano&meses=&id_corretora=&data_ref=`
+devolve a série, total, média por barra e `nao_pago` (parte do total cujo pagamento ainda não aconteceu; já está na barra do ex). Conferido contra SQL:
+jlrterceiro 1 ano R$ 15.840,83, tudo R$ 57.529,60, não pago R$ 1.596,36.
+
+**Insiders por ação (2026-10-23)**: rotas `/insiders` (caixa de ticker + atalhos das ações em carteira) e `/insiders/CAMB3` (menu lateral "Insiders").
+Fonte: dados abertos da CVM, **VLMO "Posição Consolidada"** (`dados.cvm.gov.br/dados/CIA_ABERTA/DOC/VLMO/DADOS/vlmo_cia_aberta_<ano>.zip`: `..._con_<ano>.csv` =
+movimentações por cargo, `vlmo_cia_aberta_<ano>.csv` = índice com o link do documento `rad.cvm.gov.br`, mesma chave CNPJ+referência+versão), 2018+. Carga:
+`scrape/scraper_insiders_cvm.py [--desde 2018]` → `tb_insider_movimentacao` (por ano apaga e regrava; só a ÚLTIMA versão de cada companhia/mês; 'Saldo
+Inicial' vai pra `tb_insider_saldo`; só emissores do cadastro; ~135 mil linhas). A `tb_insider_negociacao` (60 mil linhas, 2008–2026-06) é do `scraper_insider.py` antigo, que lê PDF, e fica
+como está. API: `GET /insiders/{ticker}?meses=&data_ref=` → resumo, `mensal` (compras/vendas à vista de Ações/Units por mês de competência + link),
+`por_cargo` e `operacoes` (todas as movimentações, até 2.000; bonificação, empréstimo e plano de remuneração aparecem na lista mas não entram na conta
+líquida). Tela: resumo, tabela por mês no formato do Fundamentus (compras, vendas, líquido em ações e R$, preço médio de compra, link "Abrir") e tabela
+de operações (quem, tipo, corretora, link), janela 6 meses…Tudo, respeita a data de referência. Conferido contra o Fundamentus (CAMB3 ago/2026: 5.000
+ações, R$ 41.589,87, PM R$ 8,32). Busca com autocomplete (`BuscaAcao.tsx`, nas duas telas): ticker OU nome da empresa, sem acento e em qualquer parte do nome, sugestões enquanto digita
+(debounce 150 ms), ↑↓/Enter/Esc e mouse; `GET /acoes/busca?q=` ordena por ticker exato, ticker que começa com o texto, sigla da empresa (PETR → PETR3/PETR4),
+palavra do nome, nome que contém (o banco não tem `unaccent`: a normalização é em Python). Entrada `/insiders` também traz o **ranking** das empresas com maior compra líquida e maior venda líquida de insiders
+(`GET /insiders/ranking/liquido?meses=&n=&data_ref=`; janelas 1 mês…Tudo, padrão 6 meses; N de 1 a 100, padrão 10, campo editável na tela; valor
+líquido = compra − venda à vista de Ações/Units em R$, somando as classes da empresa; o ticker mostrado é o da classe mais negociada pelos insiders). Ofertas e vendas
+em bloco de controladores dominam o topo (6 meses em 2026-10-24: PETR4 −R$ 9 bi, CSMG3/COPASA −R$ 8,4 bi numa venda de 171 mi de ações via BTG) — Filtro de GRUPO (chips Todos / Administração / Controladores, no
+ranking e na página da ação; param `grupo=todos|administracao|controlador`): vem do campo `Tipo_Cargo` do próprio formulário da CVM — Administração = 'Conselho de
+Administração', 'Diretor', 'Conselho Fiscal' e 'Órgão Estatutário' (todos 'ou Vinculado'); Controladores = 'Controlador ou Vinculado'; 58 linhas sem cargo só entram em
+'Todos'. ('ou Vinculado' = pessoas e empresas ligadas ao declarante.) Na base toda: controladores movimentaram ~R$ 247 bi à vista, o resto ~R$ 31 bi.
+**Insiders: análise melhor (2026-10-24, 5 passos)** — tudo recalculado por `scraper_insiders_cvm.py` no fim da carga (e na rotina diária):
+1. **Valor de mercado NA ÉPOCA da operação** (não o de hoje). `tb_acoes_emissor` (`scrape/scraper_acoes_emitidas.py`, lê `composicao_capital` dos ITR/DFP da CVM em cache:
+   total/ON/PN/tesouraria por trimestre, 8,4 mil linhas) + `fn_valor_mercado_em(emissor, data)` = ações em circulação do último trimestre ≤ data (total − tesouraria, corrigidas por
+   `tb_evento_corporativo` entre o fim do trimestre e a data) × preço REAL do dia POR CLASSE (ON pelo ticker ON, PN pelo PN, na proporção de preferenciais do capital; UNIT nunca
+   entra, senão ON+PN contaria em dobro: BPAC11 deu R$ 638 bi com o preço da unit, certo ~R$ 320 bi). Algumas empresas informam a quantidade em milhares: `nr_escala` é inferido por
+   (nessa ordem) `qt_acoes` do yfinance (0,7–1,4×), P/VP plausível com o PL e o preço do fim do trimestre, maior operação de insider > ações (→ ×1000) e herança do trimestre vizinho
+   confiável; validado contra o yfinance (1.388 de 1.476 dentro de 25%, nenhum erro ×1000). `fn_popula_insider_mercado()` (~35 s) grava em cada movimentação `qt_acoes_emissor`,
+   `vl_valor_mercado` e `vl_pct_mercado` (= volume ÷ VM da época, 96,7% das linhas); `fn_classe_insider(texto)` mapeia a característica livre do formulário pra ON/PN/UNIT.
+2. **Qualidade**: `fl_bloco` (quantidade ≥ 25% do volume do pregão e ≥ R$ 5 mi, ou ≥ 2% da empresa de uma vez: ofertas, vendas casadas — COPASA, 171 mi de ações via BTG = 37,8% da empresa) e
+   `fl_suspeito` (preço do formulário fora de [mín/2, máx×2] do dia, ou operação maior que a empresa; ~11,7% das à vista). `fl_suspeito` fica FORA das contas por padrão (`com_suspeitos`); `fl_bloco` ENTRA por padrão desde 2026-10-24 (`com_blocos=true`; a tela tem o checkbox "Excluir vendas em bloco e ofertas", decisão do usuário depois do teste que mostrou que bloco não sinaliza diferente), e as duas aparecem na lista de operações com etiqueta. `medida=bruto` (padrão: maiores compras e maiores vendas, cada lista pelo seu total) | `liquido`.
+3. **% da posição do grupo**: `tb_insider_saldo` guarda o 'Saldo Inicial' de cada mês (soma das empresas declarantes, última versão, por cargo/classe). Página da ação: coluna "% da posição" por mês e no
+   resumo; ranking: `pct_posicao` e `ordenar=posicao`. Denominador = saldo do mês mais antigo da janela (com formulário). Saldo 0/ausente → "—".
+4. **Operação de rotina** (Cohen–Malloy–Pomorski): `fl_rotina` por `fn_popula_insider_rotina()`; o formulário consolidado NÃO identifica a pessoa, então o "trader" é (empresa, cargo declarante, direção):
+   rotina = negociou na mesma direção no mesmo mês do calendário nos 3 anos anteriores. Só de 2022 em diante (carga começa em 2019); antes fica NULL (desconhecido). ~12% das operações; fora das
+   contas por padrão (`com_rotina`). **Não é mais filtro de tela (2026-10-24, decisão do usuário)**: tirado de API e interface (cortava só ~1,4% do valor em 6 meses); `fl_rotina` continua na tabela e alimenta o estudo.
+5. **Estudo de eventos** (`GET /insiders/estudo?grupo=&valor_min=&desde=`; SÓ o endpoint, sem tela: tirado de `/insiders` em 2026-10-24 por ser validação do método e não informação de empresa): `tb_insider_evento` (`fn_popula_insider_evento()`, ~45 s) = o que o grupo negociou à vista numa empresa num mês
+   de competência (sem bloco/suspeito, perfil rotina | oportunista | desconhecido); sinal = divulgação (`dt_entrega` = 1ª entrega do formulário no índice da CVM, nunca antes da última operação),
+   entrada no fechamento do pregão seguinte, saída em +1/3/6/12 meses, retorno TOTAL da ação mais negociada (`vl_fechamento_ajustado`) menos o Ibovespa (também retorno total). `tb_insider_base` = linha
+   de base (mesmas empresas, 1º pregão de qualquer mês desde 2019). **Resultado (2026-10-24, grupo todos, ≥ R$ 100 mil, mediana do excesso sobre o Ibovespa em 12 meses)**: base −8,2 p.p. (42% batem o índice, porque
+   empresas com insiders são menores que o índice); compra oportunista −8,6 (40%) = sem vantagem sobre a base; compra de rotina +9,1 (63%, n=123); venda oportunista −12,6 (36%, n=1.859) = pior que a base em ~4 p.p.
+   (média −9,4 contra +0,15); venda de rotina −1,5. Conclusão provisória: o sinal útil aqui é a VENDA oportunista (evitar), não a compra. Limites: meses vizinhos se sobrepõem (n efetivo menor), sem teste
+   de significância formal, viés de sobrevivência (ticker que deixou de negociar fica sem retorno), compra de rotina com amostra pequena.
+**Explicações em "?" (2026-10-24)**: os textos longos de rodapé viraram `Dica.tsx` ("?" com caixa preta ao passar o mouse/focar, posição fixa pra não ser cortada pela rolagem da tabela); os textos ficam em `DICAS` no mesmo arquivo, usados na entrada e na página da ação.
+**Layout de `/insiders` (2026-10-24)**: busca com autocomplete; filtros (grupo, período, bloco/suspeito/rotina); tabela "Insiders nas empresas da sua carteira" (compras, vendas, líquido, % do VM, % da posição por empresa em carteira, mesmo sem operação = "—"; vem do param `tickers=` do ranking, campo `carteira`); controles do ranking (N, ordenar, medida); tabela de maiores compras e, embaixo, a de maiores vendas (empilhadas, largura total; as duas mostram SEMPRE compras, vendas e líquido em R$, com a coluna que define a ordem em negrito; o N de empresas é um select 10–50 no rodapé de cada uma; % do VM e % da posição seguem a medida: no modo bruto, o % da lista de compras é só das compras e o da de vendas só das vendas).
+**Valor de mercado mínimo (2026-10-24)**: `vm_min` no ranking (select na tela: sem mínimo / 50 / 100 / **200 mi (padrão)** / 500 mi / 1 bi / 5 bi), aplicado ao VM da empresa NO DIA de cada operação (`vl_valor_mercado`); empresas sem VM saem quando há mínimo; NÃO vale pra tabela da carteira. Teste de 2026-10-24 (eventos ≥ R$ 1 mi, excesso sobre o Ibovespa em 12 meses): operações em bloco e normais NÃO diferem (compra −2,9 × −3,4 p.p.; venda −8,2 × −7,8), então bloco é só ruído de leitura do ranking, não de sinal.
+Parado em: Isto NÃO é a recompra da própria companhia (ver `scraper_recompra.py`,
+parado em 2018).
 
 **Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
 descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a

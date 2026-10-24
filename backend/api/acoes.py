@@ -2,7 +2,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import urllib3
-from fastapi import APIRouter
+import unicodedata
+
+from fastapi import APIRouter, Depends
+
+from deps import get_current_user, get_db
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -37,3 +41,41 @@ def logos(tickers: str):
     lista = [t.strip().upper() for t in tickers.split(',') if t.strip()]
     with ThreadPoolExecutor(max_workers=8) as ex:
         return dict(zip(lista, ex.map(_parentid_si, lista)))
+
+
+def _norm(t: str) -> str:
+    """minusculo e sem acento (o banco nao tem a extensao unaccent)"""
+    return ''.join(c for c in unicodedata.normalize('NFD', t or '') if unicodedata.category(c) != 'Mn').lower().strip()
+
+
+@router.get('/busca')
+def busca(q: str, limite: int = 8, usuario=Depends(get_current_user), conn=Depends(get_db)):
+    """Autocomplete de acao: aceita ticker ou nome da empresa (sem acento, em qualquer parte do nome), melhores resultados primeiro:
+    ticker exato, ticker que comeca com o texto, sigla da empresa (PETR -> PETR3, PETR4), palavra do nome que comeca com o texto, nome
+    que contem o texto. Em empate, ativas antes das que sairam de negociacao."""
+    termo = _norm(q)
+    if not termo:
+        return []
+    with conn.cursor() as cur:
+        cur.execute('''SELECT a.sg_ticker, e.nm_emissor, e.sg_emissor, a.sg_classe, COALESCE(a.fl_ativo, true)
+                       FROM public.tb_ativo a LEFT JOIN public.tb_emissor e USING (id_emissor)''')
+        achados = []
+        for ticker, nome, sigla, classe, ativa in cur.fetchall():
+            t, n, sg = _norm(ticker), _norm(nome), _norm(sigla)
+            if t == termo:
+                score = 0
+            elif t.startswith(termo):
+                score = 1
+            elif sg and sg.startswith(termo):
+                score = 2
+            elif any(p.startswith(termo) for p in n.split()):
+                score = 3
+            elif termo in n:
+                score = 4
+            elif termo in t:
+                score = 5
+            else:
+                continue
+            achados.append((score, not ativa, len(ticker), ticker, nome, classe, ativa))
+    achados.sort()
+    return [{'ticker': a[3], 'nome': a[4], 'classe': a[5], 'ativo': a[6]} for a in achados[:max(1, min(limite, 20))]]

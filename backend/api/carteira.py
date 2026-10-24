@@ -207,3 +207,67 @@ def benchmarks(
             ORDER BY d.dt_dia
             ''', (de, de, ate))
         return [{'dt_dia': r[0].isoformat(), 'ibov_pct': _f(r[1]), 'cdi_pct': _f(r[2])} for r in cur.fetchall()]
+
+
+# Agrupamento do grafico de proventos: quantos meses tem cada barra
+GRUPOS_PROVENTO = {'mes': 1, 'trimestre': 3, 'semestre': 6, 'ano': 12}
+
+
+def _inicio_barra(d: date, n: int) -> date:
+    """1o dia da barra (mes / trimestre / semestre / ano civil) que contem `d`"""
+    return date(d.year, ((d.month - 1) // n) * n + 1, 1)
+
+
+def _soma_meses(d: date, n: int) -> date:
+    m = d.year * 12 + (d.month - 1) + n
+    return date(m // 12, m % 12 + 1, 1)
+
+
+@router.get('/proventos')
+def proventos(
+    agrupar: str = 'mes',
+    meses: int | None = None,
+    id_corretora: int | None = None,
+    data_ref: date | None = None,
+    usuario=Depends(get_current_user),
+    conn=Depends(get_db),
+):
+    """Proventos LIQUIDOS por barra (mes/trimestre/semestre/ano), contados na data EX (a mesma da tela de Ganhos), ate hoje (ou
+    `data_ref`). `meses` = janela pra tras (6, 12, 24, 60); sem ele = tudo. A janela comeca no inicio da barra que contem o
+    primeiro mes dela, entao nenhuma barra fica pela metade. Barras sem provento vem com 0. `nao_pago` = parte do total cujo
+    pagamento ainda nao aconteceu na data (ja entra na barra do ex)."""
+    if agrupar not in GRUPOS_PROVENTO:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f'agrupar invalido (use {", ".join(GRUPOS_PROVENTO)})')
+    if meses is not None and meses <= 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, 'meses deve ser positivo')
+    n = GRUPOS_PROVENTO[agrupar]
+    fim = _data_ref(data_ref) or date.today()
+    filtro = ('FROM public.tb_provento_recebido_tipo t JOIN public.tb_carteira c ON c.id_carteira = t.id_carteira '
+              'WHERE c.id_usuario = %s AND (%s::int IS NULL OR t.id_corretora = %s)')
+    base = (usuario['id_usuario'], id_corretora, id_corretora)
+    with conn.cursor() as cur:
+        if meses is None:
+            cur.execute(f'SELECT min(t.dt_ex) {filtro} AND t.dt_ex <= %s', base + (fim,))
+            primeiro = cur.fetchone()[0]
+        else:
+            primeiro = _soma_meses(date(fim.year, fim.month, 1), -(meses - 1))
+        if primeiro is None:
+            return {'agrupar': agrupar, 'inicio': None, 'fim': fim.isoformat(), 'serie': [], 'total': 0.0,
+                    'media': 0.0, 'nao_pago': 0.0}
+        ini = _inicio_barra(primeiro, n)
+        cur.execute(
+            'SELECT make_date(EXTRACT(YEAR FROM t.dt_ex)::int, '
+            '((EXTRACT(MONTH FROM t.dt_ex)::int - 1) / %s) * %s + 1, 1) AS barra, sum(t.vl_total) '
+            f'{filtro} AND t.dt_ex >= %s AND t.dt_ex <= %s GROUP BY 1',
+            (n, n) + base + (ini, fim))
+        achados = {r[0]: float(r[1]) for r in cur.fetchall()}
+        cur.execute(f'SELECT COALESCE(sum(t.vl_total), 0) {filtro} AND t.dt_pagamento > %s AND t.dt_ex <= %s AND t.dt_ex >= %s', base + (fim, fim, ini))
+        nao_pago = float(cur.fetchone()[0])
+
+    serie, d = [], ini
+    while d <= fim:
+        serie.append({'periodo': d.isoformat(), 'total': round(achados.get(d, 0.0), 2)})
+        d = _soma_meses(d, n)
+    soma = sum(b['total'] for b in serie)
+    return {'agrupar': agrupar, 'inicio': ini.isoformat(), 'fim': fim.isoformat(), 'serie': serie,
+            'total': round(soma, 2), 'media': round(soma / len(serie), 2) if serie else 0.0, 'nao_pago': round(nao_pago, 2)}

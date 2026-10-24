@@ -1,4 +1,5 @@
 import os
+import ssl
 import sys
 import time
 import urllib.request
@@ -24,6 +25,17 @@ HEADERS = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KH
 # campo contra cotacao ja existente (PETR4 20/01/2025: abertura 37,22, maxima 37,43, minima
 # 37,11, fechamento 37,29, quantidade 13.912.800 -- bate exato com o que ja tinhamos do
 # yfinance pra essa data, sem nenhum split no meio).
+def contexto_ssl():
+    """Contexto TLS padrao (verifica cadeia e nome do host). Em rede com inspecao HTTPS (ex.: TJPI), o usuario aponta SSL_CERT_FILE
+    pra um pacote com a CA da rede (scrape/certs/ca_bundle_tjpi.pem, fora do git) e liga SSL_RELAXA_STRICT=1: a CA dessa rede nao traz a
+    extensao Authority Key Identifier e o Python 3.13+ (VERIFY_X509_STRICT) recusa. So afrouxa ESSA checagem de formato; a cadeia e
+    o nome do host continuam verificados e nada e desligado fora dessa variavel."""
+    ctx = ssl.create_default_context()
+    if os.environ.get('SSL_RELAXA_STRICT') == '1':
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return ctx
+
+
 def parse_linha(linha):
     # FATCOT (posicoes 211-217): ate ~2005 varios papeis eram cotados POR LOTE de 1.000 (ou 100,
     # 10.000...) acoes; o preco unitario e o preco do arquivo / FATCOT. Ignorar isso gerava saltos
@@ -60,7 +72,7 @@ def baixa_ano(ano):
         ultimo_erro = None
         for tentativa in range(1, 5):
             try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with urllib.request.urlopen(req, timeout=120, context=contexto_ssl()) as resp:
                     dados = resp.read()
                 with open(caminho + '.part', 'wb') as out:   # so vira o arquivo final se baixou inteiro
                     out.write(dados)
