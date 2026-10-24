@@ -91,13 +91,13 @@ export default function LineChart({
             const bx = direita ? X(hover) - 12 - larg : X(hover) + 12;
             return (
               <g className="tip-caixa">
-                <rect x={bx} y={P.t + 4} width={larg} height={alt} rx={6} fill="#000" fillOpacity={0.72} />
+                <rect className="tipbox" x={bx} y={P.t + 4} width={larg} height={alt} rx={6} fillOpacity={0.72} />
                 <text x={bx + 12} y={P.t + 4 + 22} fill="#fff" fontSize={12} fontWeight={600}>{data}</text>
                 {linhas.map((l, i) => {
                   const y = P.t + 4 + 22 + 20 * (i + 1);
                   return (
                     <g key={l.nome}>
-                      <circle cx={bx + 17} cy={y - 4} r={5} fill={l.cor} />
+                      <circle cx={bx + 17} cy={y - 4} r={5} style={{ fill: l.cor }} />
                       <text x={bx + 29} y={y} fill="#fff" fontSize={12}>{l.nome}</text>
                       <text x={bx + larg - 14} y={y} fill="#fff" fontSize={12} textAnchor="end">{l.valor}</text>
                     </g>

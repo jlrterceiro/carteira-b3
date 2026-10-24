@@ -6,6 +6,8 @@ import { api } from "../lib/api";
 import FiltroCorretora, { Corretora } from "./FiltroCorretora";
 import Login from "./Login";
 import MenuUsuario from "./MenuUsuario";
+import MenuToggle from "./MenuToggle";
+import TemaToggle from "./TemaToggle";
 import { dataBR } from "../lib/api";
 import { ProvedorCorretora, ProvedorDataRef, Usuario } from "../lib/sessao";
 
@@ -14,6 +16,7 @@ const ABAS = [
   { href: "/posicao", rotulo: "Posição" },
   { href: "/ganhos", rotulo: "Ganhos" },
   { href: "/proventos", rotulo: "Proventos" },
+  { href: "/acoes", rotulo: "Ações" },
   { href: "/insiders", rotulo: "Insiders" },
   { href: "/rentabilidade", rotulo: "Rentabilidade" },
 ];
@@ -68,7 +71,7 @@ export default function Casca({ children }: { children: React.ReactNode }) {
   if (!user) {
     return (
       <div className="wrap">
-        <header className="top"><h1>Minha Carteira</h1></header>
+        <header className="top"><h1>Minha Carteira</h1><TemaToggle /></header>
         <Login onOk={setUser} />
       </div>
     );
@@ -87,6 +90,7 @@ export default function Casca({ children }: { children: React.ReactNode }) {
       </aside>
       <div className="main">
         <header className="topbar">
+          <MenuToggle />
           {!noPerfil && (
             <label className="filtro-corretora">
               <span className="muted">Data</span>
@@ -95,6 +99,7 @@ export default function Casca({ children }: { children: React.ReactNode }) {
             </label>
           )}
           {!noPerfil && <FiltroCorretora corretoras={corretoras} valor={corretora} onChange={escolheCorretora} />}
+          <TemaToggle />
           <MenuUsuario
             nome={user.nm_usuario}
             email={user.ds_email}
@@ -117,6 +122,10 @@ export default function Casca({ children }: { children: React.ReactNode }) {
             <ProvedorDataRef value={noPerfil ? null : dataRef}>{children}</ProvedorDataRef>
           </ProvedorCorretora>
         </main>
+        <footer className="rodape">
+          <span>Minha Carteira · dados públicos da B3 e da CVM · cotações do fechamento do último pregão (a coleta durante o pregão tem atraso de ~15 minutos).</span>
+          <span>Conteúdo informativo, sem caráter de recomendação de investimento.</span>
+        </footer>
       </div>
     </div>
   );

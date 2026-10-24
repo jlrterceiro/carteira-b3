@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import acoes
+import acao_info
 import auth
 import carteira
 import insiders
@@ -25,6 +26,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(carteira.router)
 app.include_router(acoes.router)
+app.include_router(acao_info.router)   # depois de acoes: as rotas fixas (/logos, /busca) vem antes de /{ticker}
 app.include_router(insiders.router)
 app.include_router(perfil.router)
 

@@ -63,8 +63,8 @@ function Matriz({ mensal, anual }: { mensal: SerieMes; anual: SerieMes }) {
 }
 
 const BENCH = [
-  { chave: "cdi", campo: "cdi_pct", nome: "CDI", cor: "#059669" },
-  { chave: "ibov", campo: "ibov_pct", nome: "Ibovespa", cor: "#db2777" },
+  { chave: "cdi", campo: "cdi_pct", nome: "CDI", cor: "var(--graf-verde)" },
+  { chave: "ibov", campo: "ibov_pct", nome: "Ibovespa", cor: "var(--graf-rosa)" },
 ] as const;
 
 type Metodo = "receber" | "status_invest";

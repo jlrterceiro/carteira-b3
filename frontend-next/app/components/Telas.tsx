@@ -1,4 +1,5 @@
 "use client";
+import Acao, { AcaoBusca } from "./Acao";
 import Ganhos from "./Ganhos";
 import Insiders from "./Insiders";
 import InsidersBusca from "./InsidersBusca";
@@ -36,4 +37,10 @@ export function InsidersBuscaTela() {
   const c = useCorretora();
   const d = useDataRef();
   return <InsidersBusca key={`${c ?? "todas"}|${d ?? "hoje"}`} idCorretora={c} dataRef={d} />;
+}
+export function AcaoTela({ ticker }: { ticker: string }) {
+  return <Acao key={ticker} ticker={ticker} />;
+}
+export function AcaoBuscaTela() {
+  return <AcaoBusca />;
 }

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, brl, cor, pct } from "../lib/api";
 import { useSort } from "../lib/sort";
@@ -80,7 +81,7 @@ export default function Posicao({ idCorretora, dataRef }: { idCorretora: number 
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={`https://statusinvest.com.br/img/company/avatar/${logos[l.sg_ticker]}.jpg`} alt="" />
                 )}
-                {l.sg_ticker}</span></td>
+                <Link className="rank-link" href={`/acoes/${l.sg_ticker}`}>{l.sg_ticker}</Link></span></td>
               <td>{l.quantidade.toLocaleString("pt-BR")}</td>
               <td>{brl(l.preco_medio)}</td>
               <td>{brl(l.preco_atual)}</td>

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, brl, cor } from "../lib/api";
+import { brlCompacto } from "../lib/formato";
 import BuscaAcao from "./BuscaAcao";
 import Dica, { DICAS } from "./Dica";
 
@@ -15,9 +16,6 @@ type LinhaCarteira = {
 };
 type Ranking = { inicio: string; fim: string; meses: number; n: number; ordenar: string; sem_valor_mercado: number; compradores: Linha[]; vendedores: Linha[]; carteira: LinhaCarteira[] };
 
-// "R$ 744,1 mi" / "R$ 8,97 bi" (o valor exato fica no title da celula)
-const brlCompacto = (v: number) =>
-  `${v < 0 ? "-" : ""}R$ ${Math.abs(v).toLocaleString("pt-BR", { notation: "compact", maximumFractionDigits: 1 })}`;
 
 const GRUPOS: { id: string; rotulo: string; dica: string }[] = [
   { id: "todos", rotulo: "Todos", dica: "administradores e controladores" },

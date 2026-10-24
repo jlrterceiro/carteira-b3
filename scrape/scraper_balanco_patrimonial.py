@@ -9,6 +9,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from db_lib import get_conn
+from cvm_cache_util import renova_se_velho
 from cnpj_emissor import fetch_emissores_cnpj, periodo_valido
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cvm_cache')
@@ -38,6 +39,7 @@ def fetch_ativos_do_emissor(conn, id_emissor):
 
 def download_cvm_csv(tipo, ano, demonstrativo, grupo):
     os.makedirs(CACHE_DIR, exist_ok=True)
+    renova_se_velho(tipo, ano)
     csv_name = f'{tipo}_cia_aberta_{demonstrativo}_{grupo}_{ano}.csv'
     csv_path = os.path.join(CACHE_DIR, csv_name)
     if os.path.exists(csv_path):

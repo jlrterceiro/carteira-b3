@@ -229,6 +229,34 @@ Administração', 'Diretor', 'Conselho Fiscal' e 'Órgão Estatutário' (todos '
 Parado em: Isto NÃO é a recompra da própria companhia (ver `scraper_recompra.py`,
 parado em 2018).
 
+**Página da ação (2026-10-24)**: rotas `/acoes` (busca com autocomplete + suas ações) e `/acoes/PETR4` (menu "Ações"; ticker da Posição e botão na tela de Insiders levam
+pra ela). Inspirada em Investidor10/Status Invest (só a lista de seções; o Status Invest bloqueia robô com 403, então o layout dele veio de um PDF que o usuário salvou), com dados só
+nossos. API em `backend/api/acao_info.py` (router `/acoes`, registrado DEPOIS de `acoes.py` pra `/logos` e `/busca` virem antes de `/{ticker}`; tudo exige login):
+`GET /acoes/{ticker}` (resumo: cadastro, cotação + variação do dia, mín/máx 52 semanas e do mês, valorização 12m/mês/ano, valor de mercado, dividend yield 12m, indicadores,
+retornos contra Ibovespa e CDI, insiders 12 meses, eventos corporativos), `/cotacoes?periodo=1m|6m|1a|5a|10a|max&serie=total|ajustada|nominal` (até 1.200 pontos, decimado; a TELA usa só `total` = ajustada por eventos E dividendos, o padrão, e `ajustada` = só por eventos, decisão do usuário: o preço é sempre ajustado por desdobramentos/grupamentos/bonificações e a escolha é só quanto aos dividendos; `nominal` ficou só na API),
+`/proventos` (lista com data com/ex/pagamento, total por ano na base de hoje e payout por ano = proventos do ano ÷ LPA do ano, os dois na base da época) e
+`/resultados?periodo=trimestral|anual&n=` (DRE + balanço + fluxo de caixa por período). Tela: `Acao.tsx` (cabeçalho, gráfico `GraficoPreco.tsx`, rentabilidade, indicadores em grupos
+com "?" de fórmula, dividendos, resultados com `BarChart` agora aceitando negativo, insiders, eventos, sobre a empresa); sem dado → "—".
+Indicadores (todos TTM = 4 trimestres CONSECUTIVOS da DRE; sem isso ficam vazios): valor de mercado = `fn_valor_mercado_em`; P/L, LPA, ROE usam o lucro atribuído aos controladores;
+margem líquida e ROA o consolidado; EBIT = `vl_resultado_operacional` (CVM 3.05); EV = VM + dívida líquida; ROIC = EBIT×(1−34%) ÷ (PL + dívida líquida), alíquota fixa; P/Ativo circ. líquido =
+NCAV de Graham; CAGR de 5 anos pelas linhas ANUAL. Não existem EV/EBITDA nem margem EBITDA (depreciação fora da curadoria). **Banco/financeira** (balanço sem ativo circulante) → dívida,
+EBIT, margem bruta e ROIC ficam vazios de propósito (`financeira: true`). Conferido contra o Status Invest com a mesma data de dados: DY 6,25% × 6,28%, 12 meses +111,9% × +95,8% (mesma
+fórmula? não: o deles inclui outra data de corte) — as diferenças de P/L, margens etc. vinham de estarmos 1 trimestre atrás (ver abaixo).
+**Demonstrações da CVM estavam atrasadas (achado em 2026-10-24)**: os scrapers de DRE/balanço/DFC reaproveitavam o cache em disco SEM nunca renovar o zip do ano corrente, então o banco
+parou no 1T26 com o 2T26 já publicado. `scrape/cvm_cache_util.py::renova_se_velho` apaga o zip e os CSVs do ano corrente e do anterior (DFP ganha reapresentação) com mais de 20 h, uma vez
+por processo, chamada no início de `download_cvm_csv` dos três scrapers. Ordem pra atualizar tudo: `scraper_dre` → `popula_dre` → `scraper_balanco_patrimonial` → `popula_balanco` →
+`scraper_dfc` → `popula_dfc` → `scraper_acoes_emitidas` (nenhum está na rotina diária ainda).
+
+**Tema escuro (2026-10-24)**: feito do zero (o `@media (prefers-color-scheme: dark)` antigo foi removido). Botão "Escuro/Claro" na barra do topo (`TemaToggle.tsx`, também na tela de login):
+o tema fica em `data-tema="claro|escuro"` no `<html>`, salvo em `localStorage` (`tema`); na 1ª visita segue o sistema. Um script inline no `<head>` do `layout.tsx` aplica o tema antes da primeira
+pintura (sem piscar). Tokens em `globals.css` (`:root` e `:root[data-tema="escuro"]`): `--bg`/`--card`/`--card2` (menus e popovers)/`--hover`, `--accent` (links e linhas) × `--accent-bg` (fundo de botão,
+texto branco), `--pos`/`--neg`, `--tip-*` (tooltips) e `--graf-verde/rosa/vermelho` (séries dos gráficos, usados via `style={{fill|stroke}}`/`var()`; nada de hex nos componentes). Contrastes conferidos:
+texto 14,7:1, secundário 7,1:1, link 7,7:1, verde/vermelho 10/7:1. Tooltips SVG usam a classe `.tipbox`. Ao criar componente novo, usar as variáveis, não cores fixas.
+
+**Menu escondível e rodapé (2026-10-24)**: botão "«"/"☰" no canto esquerdo da barra do topo (`MenuToggle.tsx`) esconde o menu lateral e dá a tela toda ao conteúdo; o estado fica em `data-menu="fechado"` no `<html>`
+(mesmo script de `layout.tsx` do tema aplica o valor salvo em `localStorage.menu` antes da 1ª pintura). `.main` virou coluna (min-height 100vh) com `<footer className="rodape">` no fim: aviso de fonte (dados públicos
+B3/CVM, cotação do fechamento, atraso de ~15 min na coleta intradia) e de que não é recomendação — e o respiro no fim da rolagem.
+
 **Carteira só no nível do usuário (decisão de 2026-10-18)**: a funcionalidade de várias carteiras por usuário foi
 descartada por ser complexa demais. Some da API e da interface (nem seletor, nem menção no Perfil; o upload usa a
 carteira do usuário sem perguntar). A tabela `tb_carteira` e o `id_carteira` continuam existindo POR DENTRO (as

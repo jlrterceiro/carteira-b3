@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, brl, cor, dataBR } from "../lib/api";
 import BuscaAcao from "./BuscaAcao";
@@ -91,7 +92,7 @@ export default function Insiders({ ticker, dataRef }: { ticker: string; dataRef:
       {d && (
         <div className={carregando ? "recarregando" : undefined}>
           <div className="card">
-            <h3 style={{ margin: 0 }}>{d.ticker} · {d.nome}</h3>
+            <h3 style={{ margin: 0 }}>{d.ticker} · {d.nome} <Link className="rank-link" href={`/acoes/${d.ticker}`} style={{ fontWeight: 400, fontSize: 14 }}>· ver a ação →</Link></h3>
             <div className={`big ${cor(d.resumo.liquido_valor)}`}>{brl(d.resumo.liquido_valor)}</div>
             <p className="muted">
               compra líquida dos insiders no período
